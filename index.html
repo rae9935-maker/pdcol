@@ -8,11 +8,17 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
-        /* 정적(Static) Google Sans 폰트를 웹 화면 UI 전체에 임베딩 */
+        /* 업로드된 구글 산스 정적 폰트 패키지를 웹 UI 전체에 다이내믹 바인딩 */
         @font-face {
-            font-family: 'Google Sans Static';
+            font-family: 'Google Sans Custom';
             src: url('./GoogleSans-Regular.ttf') format('truetype');
             font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Google Sans Custom';
+            src: url('./GoogleSans-Bold.ttf') format('truetype');
+            font-weight: bold;
             font-style: normal;
         }
 
@@ -23,7 +29,7 @@
         body {
             margin: 0;
             padding: 0;
-            font-family: 'Google Sans Static', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Google Sans Custom', -apple-system, BlinkMacSystemFont, sans-serif;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -162,7 +168,7 @@
         .log-error { color: #c5221f; font-weight: bold; }
         .log-info { color: #1a73e8; }
         .log-warn { color: #b06000; font-weight: bold; }
-        .log-debug { color: #6c757d; font-style: italic; background-color: #e9ecef; padding: 2px 4px; border-radius: 4px; }
+        .log-debug { color: #6c757d; font-style: italic; background-color: #e9ecef; padding: 4px 8px; border-radius: 4px; }
 
         .info-text {
             margin-top: 35px;
@@ -295,8 +301,6 @@
         
         for (var i = 0; i < proxies.length; i++) {
             var currentProxy = proxies[i];
-            var proxyName = i === 0 ? "고속망(CorsProxy)" : i === 1 ? "기본망(CodeTabs)" : "비상망(AllOrigins)";
-            
             try {
                 var finalUrl = currentProxy + encodeURIComponent(targetUrl);
                 var controller = new AbortController();
@@ -304,10 +308,7 @@
                 
                 var res = await fetch(finalUrl, { signal: controller.signal });
                 clearTimeout(id);
-                
-                if (res.ok) {
-                    return res;
-                }
+                if (res.ok) return res;
             } catch (e) {}
         }
         throw new Error("모든 우회 통신망이 법제처 서버와 연결하는 데 실패했습니다.");
@@ -324,9 +325,7 @@
 
     async function fetchCaseTextReal(caseNum) {
         var OC = document.getElementById('ocInput').value.trim();
-        if (!OC) {
-            throw new Error("우측 상단의 '인증키(oc)' 가 비어 있습니다.");
-        }
+        if (!OC) throw new Error("우측 상단의 '인증키(oc)' 가 비어 있습니다.");
 
         var searchUrl = "https://www.law.go.kr/DRF/lawSearch.do?OC=" + OC + "&target=prec&type=XML&query=" + encodeURIComponent(caseNum);
         var searchResponse = await fetchWithFallback(searchUrl, caseNum);
@@ -344,17 +343,12 @@
         var precSeq = "";
         var cleanTargetCase = caseNum.replace(/\s+/g, "");
         
-        addLog("[" + caseNum + "] 검색 목록 매칭 파싱 시작...");
-        
         for (var i = 0; i < precBlocks.length; i++) {
             var block = precBlocks[i];
             var blockCaseNum = (getXmlTagValue(block, "사건번호") || getXmlTagValue(block, "caseNumber")).replace(/\s+/g, "");
-            
             if (blockCaseNum === cleanTargetCase) {
                 precSeq = getXmlTagValue(block, "precSeq") || getXmlTagValue(block, "판례일련번호");
-                if (precSeq) {
-                    break;
-                }
+                if (precSeq) break;
             }
         }
         
@@ -371,7 +365,7 @@
         var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=prec&ID=" + precSeq + "&type=XML";
         var detailResponse = await fetchWithFallback(detailUrl, caseNum);
         
-        var detailBuffer = await detailResponse.append ? await detailResponse.arrayBuffer() : await detailResponse.arrayBuffer();
+        var detailBuffer = await detailResponse.arrayBuffer();
         var detailText = utf8Decoder.decode(detailBuffer);
         
         if (!detailText.includes("법원명") && !detailText.includes("사건번호")) {
@@ -392,11 +386,31 @@
         var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
         var summary2 = cleanText(getXmlTagValue(detailText, "판결요지"));
         
-        // [구조 고도화] 독립된 이유 태그 외에 주문과 이유가 병합된 '전문' 데이터 레이어를 동시 추적
-        var textBody = cleanText(getXmlTagValue(detailText, "전문"));
-        if (!textBody) {
-            textBody = cleanText(getXmlTagValue(detailText, "이유"));
-            if (textBody) textBody = "【이유】\n" + textBody;
+        // [방어형 무적 데이터 매칭 파이프라인] 가능한 본문 태그 전방위 역추적 가동
+        var bodyTags = ["전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
+        var textBody = "";
+        for (var t = 0; t < bodyTags.length; t++) {
+            var extractedValue = cleanText(getXmlTagValue(detailText, bodyTags[t]));
+            if (extractedValue && extractedValue.length > textBody.length) {
+                textBody = extractedValue;
+            }
+        }
+
+        // [최종 폴백 안전망] 위 태그 추적이 브라우저 특성으로 실패할 시 가장 긴 내부 CDATA 노드를 문자열 정규식으로 직접 포착
+        if (!textBody || textBody.length < 150) {
+            var cdataRegex = /<!\[CDATA\[([\s\S]*?)\]\]>/gi;
+            var cdataMatch;
+            var longestCdata = "";
+            while ((cdataMatch = cdataRegex.exec(detailText)) !== null) {
+                var cdataContent = cleanText(cdataMatch[1]);
+                if (cdataContent !== summary1 && cdataContent !== summary2 && cdataContent.length > longestCdata.length) {
+                    longestCdata = cdataContent;
+                }
+            }
+            if (longestCdata.length > textBody.length) {
+                textBody = longestCdata;
+                addLog("[" + caseNum + "] 💡 시스템 백업 파싱 레이어 활성화: 가장 긴 독자 데이터 노드를 추출했습니다.", "success");
+            }
         }
 
         var fullText = courtName + " " + sentenceDate + " 선고 " + caseNumber + " 판결 [" + caseName + "]\n\n";
@@ -404,12 +418,17 @@
         if (summary2) fullText += "【판결요지】\n" + summary2 + "\n\n";
         
         if (textBody) {
-            fullText += textBody;
+            // "전문" 태그 내부에 이미 표제어가 섞여 오는 경우가 있으므로 가공 매칭
+            if (!textBody.startsWith("【") && !textBody.startsWith("[")) {
+                fullText += "【본문 및 이유】\n" + textBody;
+            } else {
+                fullText += textBody;
+            }
         } else {
             fullText += "【이유】\n(※ 본 판례는 요약 정보만 제공되는 항목입니다.)";
         }
 
-        addLog("[" + caseNum + "] 모든 문언 데이터 결합 및 규격화 성공", "success");
+        addLog("[" + caseNum + "] 모든 본문 데이터 결합 및 유니코드 규격화 성공", "success");
         return fullText;
     }
 
@@ -419,7 +438,6 @@
         addLog("입력 판례 데이터 분석 파싱 중...");
         
         var caseList = extractCaseNumbers(inputData);
-
         if (caseList.length === 0) {
             addLog("⚠️ 유효한 사건번호 조합이 감지되지 않았습니다.", "error");
             return;
@@ -443,11 +461,8 @@
             return;
         }
 
-        if (type === 'txt') {
-            downloadTXT(collectedData);
-        } else if (type === 'pdf') {
-            await downloadPDF(collectedData);
-        }
+        if (type === 'txt') downloadTXT(collectedData);
+        else if (type === 'pdf') await downloadPDF(collectedData);
     }
 
     function downloadTXT(data) {
@@ -455,9 +470,7 @@
         var output = "";
         for (var i = 0; i < data.length; i++) {
             output += data[i].content;
-            if (i < data.length - 1) {
-                output += "\n\n----------\n\n";
-            }
+            if (i < data.length - 1) output += "\n\n----------\n\n";
         }
 
         var blob = new Blob(["\uFEFF" + output], { type: "text/plain;charset=utf-8" });
@@ -471,37 +484,46 @@
     }
 
     async function fetchFontAsBase64(url) {
-        addLog("내 GitHub 저장소 내부의 Google Sans 정적 서체 로드 시도 중...");
         try {
             var response = await fetch(url);
-            if(!response.ok) throw new Error("내 저장소 안에 'GoogleSans-Regular.ttf' 파일이 없거나 경로 불일치 오류가 발생했습니다.");
+            if(!response.ok) return null;
             var blob = await response.blob();
-            return new Promise(function(resolve, reject) {
+            return new Promise(function(resolve) {
                 var reader = new FileReader();
                 reader.onloadend = function() { resolve(reader.result.split(',')[1]); };
-                reader.onerror = function() { reject(new Error("바이너리 직렬화 실패")); };
+                reader.onerror = function() { resolve(null); };
                 reader.readAsDataURL(blob);
             });
         } catch (e) {
-            addLog("⚠️ 내 저장소 서체 로드 실패 (" + e.message + "). 시스템 기본 폰트로 대체 구성합니다.", "warn");
             return null;
         }
     }
 
     async function downloadPDF(data) {
-        addLog("PDF 컴파일러 런타임 가동...");
+        addLog("PDF 컴파일러 런타임 가동 및 저장소 서체 로드 중...");
         try {
-            var fontUrl = "./GoogleSans-Regular.ttf";
-            var fontBase64 = await fetchFontAsBase64(fontUrl);
+            // 저장소에 완벽히 올려두신 정적 패키지 어드레싱 (Regular & Bold 교차 로드 기법 가동)
+            var fontBase64Regular = await fetchFontAsBase64("./GoogleSans-Regular.ttf");
+            var fontBase64Bold = await fetchFontAsBase64("./GoogleSans-Bold.ttf");
 
             var jsPDF = window.jspdf.jsPDF;
             var doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-            if (fontBase64) {
-                doc.addFileToVFS("GoogleSans.ttf", fontBase64);
-                doc.addFont("GoogleSans.ttf", "GoogleSans", "normal");
-                doc.setFont("GoogleSans");
-                addLog("정적 저장소 Google Sans 서체 결합 완료.", "success");
+            // jsPDF VFS 엔진에 서체 가중치(Weight) 연동 바인딩
+            if (fontBase64Regular) {
+                doc.addFileToVFS("GoogleSans-Regular.ttf", fontBase64Regular);
+                doc.addFont("GoogleSans-Regular.ttf", "GoogleSans", "normal");
+            }
+            if (fontBase64Bold) {
+                doc.addFileToVFS("GoogleSans-Bold.ttf", fontBase64Bold);
+                doc.addFont("GoogleSans-Bold.ttf", "GoogleSans", "bold");
+            }
+
+            if (fontBase64Regular || fontBase64Bold) {
+                doc.setFont("GoogleSans", "normal");
+                addLog("구글 고품질 정적 서체 패키지(Regular & Bold) 결합 완료.", "success");
+            } else {
+                addLog("⚠️ 저장소 내부 서체 로드 실패로 시스템 기본 폰트로 대체 구동합니다.", "warn");
             }
 
             var margin = 10;
@@ -519,15 +541,20 @@
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
                 if (i > 0) doc.addPage();
-                addLog("[" + item.title + "] PDF 표준 규격 도면 배치 중 (A4, 마진 10mm, 행간 2.0)...");
+                addLog("[" + item.title + "] 고급 독해용 레이아웃 구성 및 도면 드로잉 중...");
 
                 var currentY = margin + 5;
 
+                // 1. 타이틀 출력 (Bold, 크기 15)
+                if (fontBase64Bold) doc.setFont("GoogleSans", "bold");
                 doc.setFontSize(fontSizeTitle);
                 doc.text(item.title, margin, currentY);
-                currentY += lineHeightTitle + 3;
+                currentY += lineHeightTitle + 4;
 
+                // 본문 폰트 원상복구 (Regular, 크기 11)
+                if (fontBase64Regular) doc.setFont("GoogleSans", "normal");
                 doc.setFontSize(fontSizeBody);
+                
                 var paragraphs = item.content.split('\n');
 
                 for (var j = 0; j < paragraphs.length; j++) {
@@ -535,6 +562,14 @@
                     if (para.trim() === "") {
                         currentY += lineHeightBody;
                         continue;
+                    }
+
+                    // 가독성을 위해 표제어 괄호 구간 가중치 스캔 스타일링
+                    var isHeader = para.trim().startsWith("【") || para.trim().startsWith("[");
+                    if (isHeader && fontBase64Bold) {
+                        doc.setFont("GoogleSans", "bold");
+                    } else if (fontBase64Regular) {
+                        doc.setFont("GoogleSans", "normal");
                     }
 
                     var lines = doc.splitTextToSize(para, printWidth);
@@ -546,13 +581,13 @@
                         doc.text(lines[k], margin, currentY);
                         currentY += lineHeightBody;
                     }
-                    currentY += lineHeightBody;
+                    currentY += lineHeightBody; // 문단 간격 벌리기 규칙 준수
                 }
             }
 
-            addLog("PDF 바이너리 스트림 변환 완료. 기기로 배출 중...");
+            addLog("바이너리 마감 스트림 스트리밍 배출 중...");
             doc.save("판례모음_" + new Date().toISOString().slice(0,10) + ".pdf");
-            addLog("🎉 PDF 회독용 파일 다운로드가 정상 완료되었습니다.", "success");
+            addLog("🎉 가독성이 극대화된 PDF 판례집 다운로드가 완료되었습니다!", "success");
         } catch (error) {
             addLog("❌ PDF 최종 결합 치명적 실패: " + error.message, 'error');
         }
