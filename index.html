@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>판례 검색기</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+/* 1. 세련되고 깔끔한 미니멀 UI 디자인 */
+* {
+box-sizing: border-box;
+}
+body {
+margin: 0;
+padding: 0;
+font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+display: flex;
+flex-direction: column;
+justify-content: center;
+align-items: center;
+height: 100vh;
+background-color: #fafafa;
+color: #202124;
+}
+.search-container {
+text-align: center;
+width: 100%;
+max-width: 650px;
+padding: 30px;
+background: #ffffff;
+border-radius: 16px;
+box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+margin-top: -20px;
+}
+
+/* 새로운 타이틀 스타일 */
+.main-title {
+font-size: 32px;
+font-weight: 700;
+color: #1a73e8;
+margin-bottom: 25px;
+letter-spacing: -0.5px;
+}
+
+/* 인증키 입력 칸 스타일 */
+.oc-container {
+margin-bottom: 15px;
+text-align: right;
+}
+.oc-input {
+padding: 8px 12px;
+font-size: 12px;
+border: 1px solid #dadce0;
+border-radius: 6px;
+width: 220px;
+outline: none;
+transition: border-color 0.2s;
+}
+.oc-input:focus {
+border-color: #1a73e8;
+}
+
+.search-box-wrapper {
+position: relative;
+width: 100%;
+}
+.search-box {
+width: 100%;
+padding: 16px 24px;
+font-size: 16px;
+border: 1px solid #dadce0;
+border-radius: 28px;
+outline: none;
+background-color: #fff;
+transition: all 0.2s;
+}
+.search-box:focus, .search-box:hover {
+box-shadow: 0 2px 8px rgba(32,33,36,0.15);
+border-color: rgba(0,0,0,0);
+}
+.btn-container {
+margin-top: 20px;
+}
+button {
+background-color: #f1f3f4;
+border: 1px solid #f1f3f4;
+border-radius: 24px;
+color: #3c4043;
+font-size: 14px;
+font-weight: 500;
+margin: 8px 6px;
+padding: 12px 24px;
+cursor: pointer;
+transition: all 0.15s;
+}
+button:hover {
+background-color: #e8eaed;
+border-color: #dadce0;
+color: #202124;
+}
+
+/* 2. 단계별 로그 상태창 스타일 /
+.log-box {
+margin-top: 25px;
+padding: 15px;
+background-color: #f8f9fa;
+border: 1px solid #e8eaed;
+border-radius: 8px;
+text-align: left;
+font-family: "Courier New", Courier, monospace;
+font-size: 13px;
+color: #3c4043;
+max-height: 180px;
+overflow-y: auto;
+display: none; / 처음에 숨김 */
+}
+.log-line {
+margin: 4px 0;
+line-height: 1.4;
+}
+.log-success { color: #137333; font-weight: bold; }
+.log-error { color: #c5221f; font-weight: bold; }
+.log-info { color: #1a73e8; }
+
+.info-text {
+margin-top: 35px;
+font-size: 12px;
+color: #70757a;
+line-height: 1.6;
+border-top: 1px solid #f1f3f4;
+padding-top: 15px;
+}
+</style>
+</head>
+<body>
+
+<div class="search-container">
+<div class="main-title">판례 검색기</div>
+
+<div class="oc-container">
+<input type="password" id="ocInput" class="oc-input" placeholder="법제처 인증키(oc) 입력 후 엔터" onchange="saveOCKey()">
+</div>
+
+<div class="search-box-wrapper">
+<input type="text" id="searchInput" class="search-box" placeholder="판례번호를 입력하세요 (여러 개 입력 시 공백으로 구분)" autocomplete="off">
+</div>
+
+<div class="btn-container">
+<button onclick="handleDownload('txt')">TXT 파일 다운로드</button>
+<button onclick="handleDownload('pdf')">PDF 파일 다운로드</button>
+</div>
+
+<div id="logBox" class="log-box"></div>
+
+<div class="info-text">
+※ 대법원, 하급심, 헌법재판소 판례번호를 인식해 리스트화합니다.<br>
+오른쪽 상단에 발급받으신 인증키(oc)를 입력해 두시면 브라우저에 저장됩니다.
+</div>
+</div>
+
+<script>
+window.onload = function() {
+const savedOC = localStorage.getItem('law_api_oc');
+if (savedOC) {
+document.getElementById('ocInput').value = savedOC;
+}
+};
+
+function saveOCKey() {
+const ocValue = document.getElementById('ocInput').value.trim();
+localStorage.setItem('law_api_oc', ocValue);
+alert("인증키가 브라우저에 저장되었습니다.");
+}
+
+// 로그 관련 제어 함수들
+function clearLog() {
+const logBox = document.getElementById('logBox');
+logBox.innerHTML = '';
+logBox.style.display = 'block';
+}
+
+function addLog(message, type = 'info') {
+const logBox = document.getElementById('logBox');
+const line = document.createElement('div');
+line.className = log-line log-${type}`;
+
+const timestamp = new Date().toLocaleTimeString();
+line.innerText = [${timestamp}] ${message};
+
+logBox.appendChild(line);
+logBox.scrollTop = logBox.scrollHeight; // 스크롤 늘 하단 유지
+}
+
+function extractCaseNumbers(text) {
+const caseRegex = /\d{2,4}[가-힣]{1,3}\d+/g;
+const matches = text.match(caseRegex) || [];
+return [...new Set(matches)];
+}
+
+// 실시간 법제처 API 연동 및 로그 출력
+async function fetchCaseTextReal(caseNum) {
+const OC = document.getElementById('ocInput').value.trim();
+if (!OC) {
+throw new Error("우측 상단의 '인증키(oc)' 가 비어 있습니다.");
+}
+
+const proxy = "https://api.allorigins.win/raw?url=";
+const parser = new DOMParser();
+
+addLog([${caseNum}] 법제처 1차 검색 시작 (일련번호 확인 중)...); const searchUrl =https://www.law.go.kr/DRF/lawSearch.do?OC=
+
+{encodeURIComponent(caseNum)}`;
+
+const searchResponse = await fetch(proxy + encodeURIComponent(searchUrl));
+if (!searchResponse.ok) throw new Error("법제처 1차 서버 통신에 실패했습니다.");
+
+const searchText = await searchResponse.text();
+const searchDoc = parser.parseFromString(searchText, "text/xml");
+
+const precSeqEl = searchDoc.querySelector("precSeq");
+if (!precSeqEl) {
+throw new Error(법제처 데이터베이스에 없는 판례번호입니다.);
+}
+const precSeq = precSeqEl.textContent;
+addLog([${caseNum}] 일련번호 확인 완료 (ID: ${precSeq}). 전문 매칭 시작..., 'success');
+
+// 2차 상세 전문 조회
+const detailUrl = https://www.law.go.kr/DRF/lawService.do?OC=${OC}&target=prec&ID=${precSeq}&type=XML;
+const detailResponse = await fetch(proxy + encodeURIComponent(detailUrl));
+if (!detailResponse.ok) throw new Error("법제처 2차 서버(전문 조회) 통신에 실패했습니다.");
+
+const detailText = await detailResponse.text();
+const detailDoc = parser.parseFromString(detailText, "text/xml");
+
+const courtName = detailDoc.querySelector("법원명")?.textContent || "";
+const sentenceDate = detailDoc.querySelector("선고일자")?.textContent || "";
+const caseNumber = detailDoc.querySelector("사건번호")?.textContent || "";
+const caseName = detailDoc.querySelector("사건명")?.textContent || "";
+
+const cleanText = (str) => str ? str.replace(/<[^>]*>/g, '').trim() : "";
+
+const summary1 = cleanText(detailDoc.querySelector("판시사항")?.textContent);
+const summary2 = cleanText(detailDoc.querySelector("판결요지")?.textContent);
+const reasons = cleanText(detailDoc.querySelector("이유")?.textContent);
+
+let fullText = ${courtName} ${sentenceDate} 선고 ${caseNumber} 판결 [${caseName}]\n\n;
+if (summary1) fullText += 【판시사항】\n${summary1}\n\n; if (summary2) fullText +=【판결요지】\n${summary2}\n\n;
+if (reasons) fullText += 【이유】\n${reasons}`;
+
+addLog([${caseNum}] 본문 추출 및 규격화 성공`, 'success');
+return fullText;
+}
+
+async function handleDownload(type) {
+clearLog();
+const inputData = document.getElementById('searchInput').value;
+addLog("입력 데이터 분석 중...");
+
+const caseList = extractCaseNumbers(inputData);
+
+if (caseList.length === 0) {
+addLog("⚠️ 인식된 판례번호가 없습니다. 형식을 확인하세요.", "error");
+return;
+}
+
+addLog(총 [${caseList.length}개] 의 판례가 인식되었습니다: ${caseList.join(', ')});
+
+let collectedData = [];
+for (let caseNum of caseList) {
+try {
+const content = await fetchCaseTextReal(caseNum);
+collectedData.push({ title: caseNum, content: content });
+} catch (err) {
+addLog(❌ [${caseNum}] 실패: ${err.message}, 'error');
+}
+}
+
+if (collectedData.length === 0) {
+addLog("정상적으로 처리된 판례가 없어 파일을 생성하지 않습니다.", "error");
+return;
+}
+
+if (type === 'txt') {
+downloadTXT(collectedData);
+} else if (type === 'pdf') {
+await downloadPDF(collectedData);
+}
+}
+
+function downloadTXT(data) {
+addLog("TXT 파일 포맷팅 구성 중...");
+let output = "";
+data.forEach((item, idx) => {
+output += item.content;
+if (idx < data.length - 1) {
+output += "\n\n----------\n\n";
+}
+});
+
+const blob = new Blob([output], { type: "text/plain;charset=utf-8" });
+const url = URL.createObjectURL(blob);
+const a = document.createElement("a");
+a.href = url;
+a.download = 판례모음_${new Date().toISOString().slice(0,10)}.txt`;
+a.click();
+URL.revokeObjectURL(url);
+addLog("🎉 TXT 파일 다운로드 명령이 브라우저에 전달되었습니다.", "success");
+}
+
+async function fetchFontAsBase64(url) {
+addLog("구글 오픈소스 서체 서버 연결 시도 중...");
+try {
+const response = await fetch(url);
+if(!response.ok) throw new Error("서체 다운로드 응답 상태 불안정");
+const blob = await response.blob();
+return new Promise((resolve, reject) => {
+const reader = new FileReader();
+reader.onloadend = () => resolve(reader.result.split(',')[1]);
+reader.onerror = () => reject(new Error("바이너리 변환 실패"));
+reader.readAsDataURL(blob);
+});
+} catch (e) {
+throw new Error(서체 로드 실패 (${e.message}). 로컬 파일(file://) 환경일 경우 브라우저 보안 정책에 의해 외부 서체 fetch가 차단될 수 있습니다. GitHub에 배포하면 정상 작동합니다.`);
+}
+}
+
+async function downloadPDF(data) {
+addLog("PDF 생성 프로세스 가동...");
+try {
+const fontUrl = "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansKR/NotoSansKR-Regular.ttf";
+const fontBase64 = await fetchFontAsBase64(fontUrl);
+addLog("구글 서체 인코딩 완료. PDF 빌더 인젝션 시작...", "success");
+
+const { jsPDF } = window.jspdf;
+const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+doc.addFileToVFS("GoogleSansKR.ttf", fontBase64);
+doc.addFont("GoogleSansKR.ttf", "GoogleSansKR", "normal");
+doc.setFont("GoogleSansKR");
+
+const margin = 10;
+const pageWidth = 210;
+const pageHeight = 297;
+const printWidth = pageWidth - (margin * 2);
+const bottomLimit = pageHeight - margin;
+
+const fontSizeTitle = 15;
+const fontSizeBody = 11;
+
+const lineHeightTitle = fontSizeTitle * 0.3528 * 2.0;
+const lineHeightBody = fontSizeBody * 0.3528 * 2.0;
+
+data.forEach((item, index) => {
+if (index > 0) doc.addPage();
+addLog([${item.title}] PDF 레이아웃 드로잉 중 (A4, 마진 10mm, 행간 2.0)...`);
+
+let currentY = margin + 5;
+
+doc.setFontSize(fontSizeTitle);
+doc.text(item.title, margin, currentY);
+currentY += lineHeightTitle + 3;
+
+doc.setFontSize(fontSizeBody);
+const paragraphs = item.content.split('\n');
+
+paragraphs.forEach(para => {
+if (para.trim() === "") {
+currentY += lineHeightBody;
+return;
+}
+
+const lines = doc.splitTextToSize(para, printWidth);
+lines.forEach(line => {
+if (currentY > bottomLimit) {
+doc.addPage();
+currentY = margin + 10;
+}
+doc.text(line, margin, currentY);
+currentY += lineHeightBody;
+});
+currentY += lineHeightBody;
+});
+});
+
+addLog("PDF 렌더링 마감 중. 다운로드 실행...");
+doc.save(판례모음_${new Date().toISOString().slice(0,10)}.pdf); addLog("🎉 PDF 파일 다운로드가 완료되었습니다!", "success"); } catch (error) { addLog(❌ PDF 단계 오류: ${error.message}`, 'error');
+}
+}
+</script>
+
+</body>
+</html>
