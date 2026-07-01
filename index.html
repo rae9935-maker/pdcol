@@ -1,446 +1,472 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>판례 검색기</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>판례 검색기</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #fafafa;
+            color: #202124;
+        }
+        .search-container {
+            text-align: center;
+            width: 100%;
+            max-width: 650px;
+            padding: 30px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            margin-top: -20px;
+        }
+        
+        .main-title {
+            font-size: 32px;
+            font-weight: 700;
+            color: #1a73e8;
+            margin-bottom: 25px;
+            letter-spacing: -0.5px;
+        }
 
-<style>
-* {
-box-sizing: border-box;
-}
-body {
-margin: 0;
-padding: 0;
-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-display: flex;
-flex-direction: column;
-justify-content: center;
-align-items: center;
-height: 100vh;
-background-color: #fafafa;
-color: #202124;
-}
-.search-container {
-text-align: center;
-width: 100%;
-max-width: 650px;
-padding: 30px;
-background: #ffffff;
-border-radius: 16px;
-box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-margin-top: -20px;
-}
+        .oc-container {
+            margin-bottom: 15px;
+            text-align: right;
+        }
+        .oc-input {
+            padding: 8px 12px;
+            font-size: 12px;
+            border: 1px solid #dadce0;
+            border-radius: 6px;
+            width: 220px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .oc-input:focus {
+            border-color: #1a73e8;
+        }
 
-.main-title {
-font-size: 32px;
-font-weight: 700;
-color: #1a73e8;
-margin-bottom: 25px;
-letter-spacing: -0.5px;
-}
+        .search-box-wrapper {
+            position: relative;
+            width: 100%;
+        }
+        .search-box {
+            width: 100%;
+            padding: 16px 24px;
+            font-size: 16px;
+            border: 1px solid #dadce0;
+            border-radius: 28px;
+            outline: none;
+            background-color: #fff;
+            transition: all 0.2s;
+        }
+        .search-box:focus, .search-box:hover {
+            box-shadow: 0 2px 8px rgba(32,33,36,0.15);
+            border-color: rgba(0,0,0,0);
+        }
+        .btn-container {
+            margin-top: 20px;
+        }
+        button {
+            background-color: #f1f3f4;
+            border: 1px solid #f1f3f4;
+            border-radius: 24px;
+            color: #3c4043;
+            font-size: 14px;
+            font-weight: 500;
+            margin: 8px 6px;
+            padding: 12px 24px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        button:hover {
+            background-color: #e8eaed;
+            border-color: #dadce0;
+            color: #202124;
+        }
+        
+        .log-box {
+            margin-top: 25px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border: 1px solid #e8eaed;
+            border-radius: 8px;
+            text-align: left;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 13px;
+            color: #3c4043;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        .log-line {
+            margin: 4px 0;
+            line-height: 1.4;
+            word-break: break-all;
+        }
+        .log-success { color: #137333; font-weight: bold; }
+        .log-error { color: #c5221f; font-weight: bold; }
+        .log-info { color: #1a73e8; }
+        .log-warn { color: #b06000; font-weight: bold; }
+        .log-debug { color: #6c757d; font-style: italic; background-color: #e9ecef; padding: 2px 4px; border-radius: 4px; }
 
-.oc-container {
-margin-bottom: 15px;
-text-align: right;
-}
-.oc-input {
-padding: 8px 12px;
-font-size: 12px;
-border: 1px solid #dadce0;
-border-radius: 6px;
-width: 220px;
-outline: none;
-transition: border-color 0.2s;
-}
-.oc-input:focus {
-border-color: #1a73e8;
-}
-
-.search-box-wrapper {
-position: relative;
-width: 100%;
-}
-.search-box {
-width: 100%;
-padding: 16px 24px;
-font-size: 16px;
-border: 1px solid #dadce0;
-border-radius: 28px;
-outline: none;
-background-color: #fff;
-transition: all 0.2s;
-}
-.search-box:focus, .search-box:hover {
-box-shadow: 0 2px 8px rgba(32,33,36,0.15);
-border-color: rgba(0,0,0,0);
-}
-.btn-container {
-margin-top: 20px;
-}
-button {
-background-color: #f1f3f4;
-border: 1px solid #f1f3f4;
-border-radius: 24px;
-color: #3c4043;
-font-size: 14px;
-font-weight: 500;
-margin: 8px 6px;
-padding: 12px 24px;
-cursor: pointer;
-transition: all 0.15s;
-}
-button:hover {
-background-color: #e8eaed;
-border-color: #dadce0;
-color: #202124;
-}
-
-.log-box {
-margin-top: 25px;
-padding: 15px;
-background-color: #f8f9fa;
-border: 1px solid #e8eaed;
-border-radius: 8px;
-text-align: left;
-font-family: "Courier New", Courier, monospace;
-font-size: 13px;
-color: #3c4043;
-max-height: 180px;
-overflow-y: auto;
-display: none;
-}
-.log-line {
-margin: 4px 0;
-line-height: 1.4;
-}
-.log-success { color: #137333; font-weight: bold; }
-.log-error { color: #c5221f; font-weight: bold; }
-.log-info { color: #1a73e8; }
-.log-warn { color: #b06000; font-weight: bold; }
-
-.info-text {
-margin-top: 35px;
-font-size: 12px;
-color: #70757a;
-line-height: 1.6;
-border-top: 1px solid #f1f3f4;
-padding-top: 15px;
-}
-</style>
+        .info-text {
+            margin-top: 35px;
+            font-size: 12px;
+            color: #70757a;
+            line-height: 1.6;
+            border-top: 1px solid #f1f3f4;
+            padding-top: 15px;
+        }
+    </style>
 </head>
 <body>
 
 <div class="search-container">
-<div class="main-title">판례 검색기</div>
+    <div class="main-title">판례 검색기</div>
+    
+    <div class="oc-container">
+        <input type="password" id="ocInput" class="oc-input" placeholder="법제처 인증키(oc) 입력 후 엔터" onchange="saveOCKey()">
+    </div>
 
-<div class="oc-container">
-<input type="password" id="ocInput" class="oc-input" placeholder="법제처 인증키(oc) 입력 후 엔터" onchange="saveOCKey()">
-</div>
+    <div class="search-box-wrapper">
+        <input type="text" id="searchInput" class="search-box" placeholder="판례번호를 입력하세요 (여러 개 입력 시 공백으로 구분)" autocomplete="off">
+    </div>
+    
+    <div class="btn-container">
+        <button onclick="handleDownload('txt')">TXT 파일 다운로드</button>
+        <button onclick="handleDownload('pdf')">PDF 파일 다운로드</button>
+    </div>
+    
+    <div id="logBox" class="log-box"></div>
 
-<div class="search-box-wrapper">
-<input type="text" id="searchInput" class="search-box" placeholder="판례번호를 입력하세요 (여러 개 입력 시 공백으로 구분)" autocomplete="off">
-</div>
-
-<div class="btn-container">
-<button onclick="handleDownload('txt')">TXT 파일 다운로드</button>
-<button onclick="handleDownload('pdf')">PDF 파일 다운로드</button>
-</div>
-
-<div id="logBox" class="log-box"></div>
-
-<div class="info-text">
-※ 대법원, 하급심, 헌법재판소 판례번호를 인식해 리스트화합니다.<br>
-오른쪽 상단에 발급받으신 인증키(oc)를 입력해 두시면 브라우저에 저장됩니다.
-</div>
+    <div class="info-text">
+        ※ 대법원, 하급심, 헌법재판소 판례번호를 인식해 리스트화합니다.<br>
+        오른쪽 상단에 발급받으신 인증키(oc)를 입력해 두시면 브라우저에 저장됩니다.
+    </div>
 </div>
 
 <script>
-window.onerror = function(msg, url, lineNo) {
-addLog("시스템 예외 감지: " + msg + " (Line: " + lineNo + ")", "error");
-return false;
-};
+    window.onerror = function(msg, url, lineNo) {
+        addLog("시스템 예외 감지: " + msg + " (Line: " + lineNo + ")", "error");
+        return false;
+    };
 
-window.onload = function() {
-try {
-var savedOC = localStorage.getItem('law_api_oc');
-if (savedOC) {
-document.getElementById('ocInput').value = savedOC;
-}
-} catch (e) {}
-};
+    window.onload = function() {
+        try {
+            var savedOC = localStorage.getItem('law_api_oc');
+            if (savedOC) {
+                document.getElementById('ocInput').value = savedOC;
+            }
+        } catch (e) {}
+    };
 
-function saveOCKey() {
-var ocValue = document.getElementById('ocInput').value.trim();
-try {
-localStorage.setItem('law_api_oc', ocValue);
-alert("인증키가 브라우저에 저장되었습니다.");
-} catch (e) {}
-}
+    function saveOCKey() {
+        var ocValue = document.getElementById('ocInput').value.trim();
+        try {
+            localStorage.setItem('law_api_oc', ocValue);
+            alert("인증키가 브라우저에 저장되었습니다.");
+        } catch (e) {}
+    }
 
-function clearLog() {
-var logBox = document.getElementById('logBox');
-logBox.innerHTML = '';
-logBox.style.display = 'block';
-}
+    function clearLog() {
+        var logBox = document.getElementById('logBox');
+        logBox.innerHTML = '';
+        logBox.style.display = 'block';
+    }
 
-function addLog(message, type) {
-if (!type) type = 'info';
-var logBox = document.getElementById('logBox');
-var line = document.createElement('div');
-line.className = 'log-line log-' + type;
-var timestamp = new Date().toLocaleTimeString();
-line.innerText = '[' + timestamp + '] ' + message;
-logBox.appendChild(line);
-logBox.scrollTop = logBox.scrollHeight;
-}
+    function addLog(message, type) {
+        if (!type) type = 'info';
+        var logBox = document.getElementById('logBox');
+        var line = document.createElement('div');
+        line.className = 'log-line log-' + type;
+        var timestamp = new Date().toLocaleTimeString();
+        line.innerText = '[' + timestamp + '] ' + message;
+        logBox.appendChild(line);
+        logBox.scrollTop = logBox.scrollHeight;
+    }
 
-function extractCaseNumbers(text) {
-var caseRegex = /\d{2,4}[가-힣]{1,3}\d+/g;
-var matches = text.match(caseRegex) || [];
-return matches.filter(function(item, pos) {
-return matches.indexOf(item) == pos;
-});
-}
+    function extractCaseNumbers(text) {
+        var caseRegex = /\d{2,4}[가-힣]{1,3}\d+/g;
+        var matches = text.match(caseRegex) || [];
+        return matches.filter(function(item, pos) {
+            return matches.indexOf(item) == pos;
+        });
+    }
 
-// 3중 고안정성 우회 서버 파이프라인 함수
-async function fetchWithFallback(targetUrl, caseNum) {
-var proxies = [
-"https://corsproxy.io/?",
-"https://api.codetabs.com/v1/proxy?url=",
-"https://api.allorigins.win/raw?url="
- ];
+    // 3중 우회 파이프라인
+    async function fetchWithFallback(targetUrl, caseNum) {
+        var proxies = [
+            "https://corsproxy.io/?",
+            "https://api.codetabs.com/v1/proxy?url=",
+            "https://api.allorigins.win/raw?url="
+        ];
+        
+        for (var i = 0; i < proxies.length; i++) {
+            var currentProxy = proxies[i];
+            var proxyName = i === 0 ? "고속망(CorsProxy)" : i === 1 ? "기본망(CodeTabs)" : "비상망(AllOrigins)";
+            
+            try {
+                addLog("[" + caseNum + "] " + proxyName + " 통신망 접속 시도 중...");
+                var finalUrl = currentProxy + encodeURIComponent(targetUrl);
+                
+                var controller = new AbortController();
+                var id = setTimeout(function() { controller.abort(); }, 6000);
+                
+                var res = await fetch(finalUrl, { signal: controller.signal });
+                clearTimeout(id);
+                
+                if (res.ok) {
+                    return res;
+                } else {
+                    addLog("⚠️ " + proxyName + " 응답 실패 (Status: " + res.status + ")", "warn");
+                }
+            } catch (e) {
+                addLog("⚠️ " + proxyName + " 연결 실패 또는 타임아웃 발생", "warn");
+            }
+        }
+        throw new Error("모든 우회 통신망이 법제처 서버와 연결하는 데 실패했습니다.");
+    }
 
-for (var i = 0; i < proxies.length; i++) {
-var currentProxy = proxies[i];
-var proxyName = i === 0 ? "고속망(CorsProxy)" : i === 1 ? "기본망(CodeTabs)" : "비상망(AllOrigins)";
+    // 인코딩 교정 및 데이터 분석기
+    async function fetchCaseTextReal(caseNum) {
+        var OC = document.getElementById('ocInput').value.trim();
+        if (!OC) {
+            throw new Error("우측 상단의 '인증키(oc)' 가 비어 있습니다.");
+        }
 
-try {
-addLog("[" + caseNum + "] " + proxyName + " 통신망 접속 시도 중...");
-var finalUrl = currentProxy + encodeURIComponent(targetUrl);
+        var parser = new DOMParser();
+        var getXmlValue = function(doc, tagName) {
+            var elements = doc.getElementsByTagName(tagName);
+            return (elements && elements.length > 0) ? elements[0].textContent : "";
+        };
 
-// 타임아웃 6초 제한 설정 (응답 없는 망은 빠르게 버림)
-var controller = new AbortController();
-var id = setTimeout(function() { controller.abort(); }, 6000);
+        // 1차 인덱싱 요청
+        var searchUrl = "https://www.law.go.kr/DRF/lawSearch.do?OC=" + OC + "&target=prec&type=XML&query=" + encodeURIComponent(caseNum);
+        var searchResponse = await fetchWithFallback(searchUrl, caseNum);
+        
+        // [인코딩 안정화 엔진] 바이너리 단위로 받아 수동 디코딩 조합 수행
+        var arrayBuffer = await searchResponse.arrayBuffer();
+        
+        // 1차 시도: UTF-8 디코딩
+        var utf8Decoder = new TextDecoder('utf-8');
+        var searchText = utf8Decoder.decode(arrayBuffer);
+        var searchDoc = parser.parseFromString(searchText, "text/xml");
+        
+        // 깨짐 현상으로 인한 XML 파싱 실패 대책 가동
+        if (searchDoc.getElementsByTagName("parsererror").length > 0 || !getXmlValue(searchDoc, "Customer")) {
+            addLog("[" + caseNum + "] UTF-8 파싱 노이즈 감지. EUC-KR 변환 및 강제 복원 수행...", "warn");
+            var eucKrDecoder = new TextDecoder('euc-kr');
+            searchText = eucKrDecoder.decode(arrayBuffer);
+            searchDoc = parser.parseFromString(searchText, "text/xml");
+        }
+        
+        var precSeq = getXmlValue(searchDoc, "precSeq");
+        if (!precSeq) {
+            var errMsg = getXmlValue(searchDoc, "errMsg");
+            if (errMsg) throw new Error("법제처 리포트오류: " + errMsg);
+            
+            // [정밀 진단 장치] 반환된 텍스트의 앞부분을 로그에 투명하게 출력
+            var cleanSnippet = searchText.substring(0, 150).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            addLog("📋 [서버 실제 응답 데이터 확인]: " + cleanSnippet, "debug");
+            
+            throw new Error("인증키(oc)가 틀렸거나, 프록시 서버가 차단 페이지를 반환했습니다.");
+        }
+        addLog("[" + caseNum + "] 판례 식별 코드 매칭 완료 (ID: " + precSeq + ")", "success");
 
-var res = await fetch(finalUrl, { signal: controller.signal });
-clearTimeout(id);
+        // 2차 전문 본문 수집 요청
+        var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=prec&ID=" + precSeq + "&type=XML";
+        var detailResponse = await fetchWithFallback(detailUrl, caseNum);
+        
+        var detailBuffer = await detailResponse.arrayBuffer();
+        var detailText = utf8Decoder.decode(detailBuffer);
+        var detailDoc = parser.parseFromString(detailText, "text/xml");
+        
+        if (detailDoc.getElementsByTagName("parsererror").length > 0 || !getXmlValue(detailDoc, "PrecService")) {
+            var eucKrDecoder = new TextDecoder('euc-kr');
+            detailText = eucKrDecoder.decode(detailBuffer);
+            detailDoc = parser.parseFromString(detailText, "text/xml");
+        }
 
-if (res.ok) {
-return res;
-} else {
-addLog("⚠️ " + proxyName + " 거부됨 (Status: " + res.status + "). 다음 우회망으로 전환합니다.", "warn");
-}
-} catch (e) {
-addLog("⚠️ " + proxyName + " 타임아웃 또는 접속 차단됨. 우회망 우회 시도...", "warn");
-}
-}
-throw new Error("법제처 API 통신망 전체 제어 불능. 잠시 후 다시 시도해 주세요.");
-}
+        var courtName = getXmlValue(detailDoc, "법원명");
+        var sentenceDate = getXmlValue(detailDoc, "선고일자");
+        var caseNumber = getXmlValue(detailDoc, "사건번호");
+        var caseName = getXmlValue(detailDoc, "사건명");
+        
+        var cleanText = function(str) {
+            return str ? str.replace(/<[^>]*>/g, '').trim() : "";
+        };
 
-// 전 기종 호환성 보장형 데이터 리트리버
-async function fetchCaseTextReal(caseNum) {
-var OC = document.getElementById('ocInput').value.trim();
-if (!OC) {
-throw new Error("우측 상단의 '인증키(oc)' 가 비어 있습니다.");
-}
+        var summary1 = cleanText(getXmlValue(detailDoc, "판시사항"));
+        var summary2 = cleanText(getXmlValue(detailDoc, "판결요지"));
+        var reasons = cleanText(getXmlValue(detailDoc, "이유"));
 
-var parser = new DOMParser();
-var getXmlValue = function(doc, tagName) {
-var elements = doc.getElementsByTagName(tagName);
-return (elements && elements.length > 0) ? elements[0].textContent : "";
-};
+        var fullText = courtName + " " + sentenceDate + " 선고 " + caseNumber + " 판결 [" + caseName + "]\n\n";
+        if (summary1) fullText += "【판시사항】\n" + summary1 + "\n\n";
+        if (summary2) fullText += "【판결요지】\n" + summary2 + "\n\n";
+        if (reasons) fullText += "【이유】\n" + reasons;
 
-// 1차 검색 인덱싱
-var searchUrl = "https://www.law.go.kr/DRF/lawSearch.do?OC=" + OC + "&target=prec&type=XML&query=" + encodeURIComponent(caseNum);
-var searchResponse = await fetchWithFallback(searchUrl, caseNum);
+        addLog("[" + caseNum + "] 본문 복사 및 서식 규격화 완료", "success");
+        return fullText;
+    }
 
-var searchText = await searchResponse.text();
-var searchDoc = parser.parseFromString(searchText, "text/xml");
+    async function handleDownload(type) {
+        clearLog();
+        var inputData = document.getElementById('searchInput').value;
+        addLog("입력 판례 데이터 분석 파싱 중...");
+        
+        var caseList = extractCaseNumbers(inputData);
 
-var precSeq = getXmlValue(searchDoc, "precSeq");
-if (!precSeq) {
-var errMsg = getXmlValue(searchDoc, "errMsg");
-if (errMsg) throw new Error("법제처 리포트: " + errMsg);
-throw new Error("존재하지 않는 판례번호이거나 인증키(oc) 식별 오류입니다.");
-}
-addLog("[" + caseNum + "] 판례 고유 식별값 획득 완료 (ID: " + precSeq + ")", "success");
+        if (caseList.length === 0) {
+            addLog("⚠️ 유효한 사건번호 조합이 감지되지 않았습니다.", "error");
+            return;
+        }
 
-// 2차 전문 데이터 파싱
-var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=prec&ID=" + precSeq + "&type=XML";
-var detailResponse = await fetchWithFallback(detailUrl, caseNum);
+        addLog("판례 수집 큐(Queue) 등록 [" + caseList.length + "개]: " + caseList.join(', '));
 
-var detailText = await detailResponse.text();
-var detailDoc = parser.parseFromString(detailText, "text/xml");
+        var collectedData = [];
+        for (var i = 0; i < caseList.length; i++) {
+            var caseNum = caseList[i];
+            try {
+                var content = await fetchCaseTextReal(caseNum);
+                collectedData.push({ title: caseNum, content: content });
+            } catch (err) {
+                addLog("❌ [" + caseNum + "] 수집 실패 원인: " + err.message, "error");
+            }
+        }
 
-var courtName = getXmlValue(detailDoc, "법원명");
-var sentenceDate = getXmlValue(detailDoc, "선고일자");
-var caseNumber = getXmlValue(detailDoc, "사건번호");
-var caseName = getXmlValue(detailDoc, "사건명");
+        if (collectedData.length === 0) {
+            addLog("가용한 문서 파일 풀이 비어있어 빌드를 중단합니다.", "error");
+            return;
+        }
 
-var cleanText = function(str) {
-return str ? str.replace(/<[^>]*>/g, '').trim() : "";
-};
+        if (type === 'txt') {
+            downloadTXT(collectedData);
+        } else if (type === 'pdf') {
+            await downloadPDF(collectedData);
+        }
+    }
 
-var summary1 = cleanText(getXmlValue(detailDoc, "판시사항"));
-var summary2 = cleanText(getXmlValue(detailDoc, "판결요지"));
-var reasons = cleanText(getXmlValue(detailDoc, "이유"));
+    function downloadTXT(data) {
+        addLog("TXT 파일 조립 레이아웃 구성 중...");
+        var output = "";
+        for (var i = 0; i < data.length; i++) {
+            output += data[i].content;
+            if (i < data.length - 1) {
+                output += "\n\n----------\n\n";
+            }
+        }
 
-var fullText = courtName + " " + sentenceDate + " 선고 " + caseNumber + " 판결 [" + caseName + "]\n\n";
-if (summary1) fullText += "【판시사항】\n" + summary1 + "\n\n";
-if (summary2) fullText += "【판결요지】\n" + summary2 + "\n\n";
-if (reasons) fullText += "【이유】\n" + reasons;
+        var blob = new Blob([output], { type: "text/plain;charset=utf-8" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "판례모음_" + new Date().toISOString().slice(0,10) + ".txt";
+        a.click();
+        URL.revokeObjectURL(url);
+        addLog("🎉 TXT 서식 파일 다운로드가 정상 완료되었습니다.", "success");
+    }
 
-addLog("[" + caseNum + "] 판결문 완벽 복사 및 정렬 완료", "success");
-return fullText;
-}
+    async function fetchFontAsBase64(url) {
+        addLog("오픈소스 구글 서체 팩 동적 빌드 중...");
+        try {
+            var response = await fetch(url);
+            if(!response.ok) throw new Error("서체 허브 미응답");
+            var blob = await response.blob();
+            return new Promise(function(resolve, reject) {
+                var reader = new FileReader();
+                reader.onloadend = function() { resolve(reader.result.split(',')[1]); };
+                reader.onerror = function() { reject(new Error("바이너리 스트림 마감 실패")); };
+                reader.readAsDataURL(blob);
+            });
+        } catch (e) {
+            addLog("⚠️ 구글 원격 서체 로드 실패로 기본 시스템 폰트로 PDF를 대체 구성합니다.", "warn");
+            return null;
+        }
+    }
 
-async function handleDownload(type) {
-clearLog();
-var inputData = document.getElementById('searchInput').value;
-addLog("입력 판례 데이터 분석 파싱 중...");
+    async function downloadPDF(data) {
+        addLog("PDF 컴파일러 런타임 가동...");
+        try {
+            var fontUrl = "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansKR/NotoSansKR-Regular.ttf";
+            var fontBase64 = await fetchFontAsBase64(fontUrl);
 
-var caseList = extractCaseNumbers(inputData);
+            var jsPDF = window.jspdf.jsPDF;
+            var doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-if (caseList.length === 0) {
-addLog("⚠️ 파싱 가능한 정규 판례번호 조합을 인식하지 못했습니다.", "error");
-return;
-}
+            if (fontBase64) {
+                doc.addFileToVFS("GoogleSansKR.ttf", fontBase64);
+                doc.addFont("GoogleSansKR.ttf", "GoogleSansKR", "normal");
+                doc.setFont("GoogleSansKR");
+                addLog("구글 가독성 서체 결합 완료.", "success");
+            }
 
-addLog("판례 수집 큐(Queue) 등록 [" + caseList.length + "개]: " + caseList.join(', '));
+            var margin = 10;
+            var pageWidth = 210;
+            var pageHeight = 297;
+            var printWidth = pageWidth - (margin * 2);
+            var bottomLimit = pageHeight - margin;
 
-var collectedData = [];
-for (var i = 0; i < caseList.length; i++) {
-var caseNum = caseList[i];
-try {
-var content = await fetchCaseTextReal(caseNum);
-collectedData.push({ title: caseNum, content: content });
-} catch (err) {
-addLog("❌ [" + caseNum + "] 수집 실패 원인: " + err.message, "error");
-}
-}
+            var fontSizeTitle = 15;
+            var fontSizeBody = 11;
+            
+            var lineHeightTitle = fontSizeTitle * 0.3528 * 2.0;
+            var lineHeightBody = fontSizeBody * 0.3528 * 2.0;
 
-if (collectedData.length === 0) {
-addLog("가용한 문서 파일 풀이 비어있어 빌드를 중단합니다.", "error");
-return;
-}
+            for (var i = 0; i < data.length; i++) {
+                var item = data[i];
+                if (i > 0) doc.addPage();
+                addLog("[" + item.title + "] PDF 표준 규격 도면 배치 중 (A4, 마진 10mm, 행간 2.0)...");
 
-if (type === 'txt') {
-downloadTXT(collectedData);
-} else if (type === 'pdf') {
-await downloadPDF(collectedData);
-}
-}
+                var currentY = margin + 5;
 
-function downloadTXT(data) {
-addLog("TXT 파일 조립 레이아웃 구성 중...");
-var output = "";
-for (var i = 0; i < data.length; i++) {
-output += data[i].content;
-if (i < data.length - 1) {
-output += "\n\n----------\n\n";
-}
-}
+                doc.setFontSize(fontSizeTitle);
+                doc.text(item.title, margin, currentY);
+                currentY += lineHeightTitle + 3;
 
-var blob = new Blob([output], { type: "text/plain;charset=utf-8" });
-var url = URL.createObjectURL(blob);
-var a = document.createElement("a");
-a.href = url;
-a.download = "판례모음_" + new Date().toISOString().slice(0,10) + ".txt";
-a.click();
-URL.revokeObjectURL(url);
-addLog("🎉 TXT 서식 파일 다운로드가 정상 완료되었습니다.", "success");
-}
+                doc.setFontSize(fontSizeBody);
+                var paragraphs = item.content.split('\n');
 
-async function fetchFontAsBase64(url) {
-addLog("오픈소스 구글 서체 팩 동적 빌드 중...");
-try {
-var response = await fetch(url);
-if(!response.ok) throw new Error("서체 허브 미응답");
-var blob = await response.blob();
-return new Promise(function(resolve, reject) {
-var reader = new FileReader();
-reader.onloadend = function() { resolve(reader.result.split(',')[1]); };
-reader.onerror = function() { reject(new Error("바이너리 스트림 마감 실패")); };
-reader.readAsDataURL(blob);
-});
-} catch (e) {
-addLog("⚠️ 구글 원격 서체 로드 실패로 기본 시스템 폰트로 PDF를 대체 구성합니다.", "warn");
-return null;
-}
-}
+                for (var j = 0; j < paragraphs.length; j++) {
+                    var para = paragraphs[j];
+                    if (para.trim() === "") {
+                        currentY += lineHeightBody;
+                        continue;
+                    }
 
-async function downloadPDF(data) {
-addLog("PDF 컴파일러 런타임 가동...");
-try {
-var fontUrl = "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansKR/NotoSansKR-Regular.ttf";
-var fontBase64 = await fetchFontAsBase64(fontUrl);
+                    var lines = doc.splitTextToSize(para, printWidth);
+                    for (var k = 0; k < lines.length; k++) {
+                        if (currentY > bottomLimit) {
+                            doc.addPage();
+                            currentY = margin + 10;
+                        }
+                        doc.text(lines[k], margin, currentY);
+                        currentY += lineHeightBody;
+                    }
+                    currentY += lineHeightBody;
+                }
+            }
 
-var jsPDF = window.jspdf.jsPDF;
-var doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-
-if (fontBase64) {
-doc.addFileToVFS("GoogleSansKR.ttf", fontBase64);
-doc.addFont("GoogleSansKR.ttf", "GoogleSansKR", "normal");
-doc.setFont("GoogleSansKR");
-addLog("구글 가독성 서체 결합 완료.", "success");
-}
-
-var margin = 10;
-var pageWidth = 210;
-var pageHeight = 297;
-var printWidth = pageWidth - (margin * 2);
-var bottomLimit = pageHeight - margin;
-
-var fontSizeTitle = 15;
-var fontSizeBody = 11;
-
-var lineHeightTitle = fontSizeTitle * 0.3528 * 2.0;
-var lineHeightBody = fontSizeBody * 0.3528 * 2.0;
-
-for (var i = 0; i < data.length; i++) {
-var item = data[i];
-if (i > 0) doc.addPage();
-addLog("[" + item.title + "] PDF 표준 규격 도면 배치 중 (A4, 마진 10mm, 행간 2.0)...");
-
-var currentY = margin + 5;
-
-doc.setFontSize(fontSizeTitle);
-doc.text(item.title, margin, currentY);
-currentY += lineHeightTitle + 3;
-
-doc.setFontSize(fontSizeBody);
-var paragraphs = item.content.split('\n');
-
-for (var j = 0; j < paragraphs.length; j++) {
-var para = paragraphs[j];
-if (para.trim() === "") {
-currentY += lineHeightBody;
-continue;
-}
-
-var lines = doc.splitTextToSize(para, printWidth);
-for (var k = 0; k < lines.length; k++) {
-if (currentY > bottomLimit) {
-doc.addPage();
-currentY = margin + 10;
-}
-doc.text(lines[k], margin, currentY);
-currentY += lineHeightBody;
-}
-currentY += lineHeightBody;
-}
-}
-
-addLog("PDF 바이너리 스트림 변환 완료. 기기로 배출 중...");
-doc.save("판례모음_" + new Date().toISOString().slice(0,10) + ".pdf");
-addLog("🎉 PDF 회독용 파일 다운로드가 정상 완료되었습니다.", "success");
-} catch (error) {
-addLog("❌ PDF 최종 결합 치명적 실패: " + error.message, 'error');
-}
-}
+            addLog("PDF 바이너리 스트림 변환 완료. 기기로 배출 중...");
+            doc.save("판례모음_" + new Date().toISOString().slice(0,10) + ".pdf");
+            addLog("🎉 PDF 회독용 파일 다운로드가 정상 완료되었습니다.", "success");
+        } catch (error) {
+            addLog("❌ PDF 최종 결합 치명적 실패: " + error.message, 'error');
+        }
+    }
 </script>
 
 </body>
