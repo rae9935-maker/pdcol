@@ -8,7 +8,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
-/* 1. 세련되고 깔끔한 미니멀 UI 디자인 */
 * {
 box-sizing: border-box;
 }
@@ -35,7 +34,6 @@ box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
 margin-top: -20px;
 }
 
-/* 새로운 타이틀 스타일 */
 .main-title {
 font-size: 32px;
 font-weight: 700;
@@ -44,7 +42,6 @@ margin-bottom: 25px;
 letter-spacing: -0.5px;
 }
 
-/* 인증키 입력 칸 스타일 */
 .oc-container {
 margin-bottom: 15px;
 text-align: right;
@@ -101,7 +98,6 @@ border-color: #dadce0;
 color: #202124;
 }
 
-/* 2. 단계별 로그 상태창 스타일 /
 .log-box {
 margin-top: 25px;
 padding: 15px;
@@ -114,7 +110,7 @@ font-size: 13px;
 color: #3c4043;
 max-height: 180px;
 overflow-y: auto;
-display: none; / 처음에 숨김 */
+display: none;
 }
 .log-line {
 margin: 4px 0;
@@ -161,119 +157,147 @@ padding-top: 15px;
 </div>
 
 <script>
+// [긴급 에러 추적기] 브라우저 내부에서 자바스크립트가 튕기면 즉시 알림을 띄웁니다.
+window.onerror = function(msg, url, lineNo, columnNo, error) {
+alert("🚨 브라우저 스크립트 에러 발생!\n내용: " + msg + "\n위치: " + lineNo + "번 줄\n상세: " + (error ? error.message : "없음"));
+return false;
+};
+
+// 보안 모드에서 localStorage 에러 차단 로직 적용
 window.onload = function() {
-const savedOC = localStorage.getItem('law_api_oc');
+try {
+var savedOC = localStorage.getItem('law_api_oc');
 if (savedOC) {
 document.getElementById('ocInput').value = savedOC;
+}
+} catch (e) {
+console.log("localStorage 접근 제한 상태");
 }
 };
 
 function saveOCKey() {
-const ocValue = document.getElementById('ocInput').value.trim();
+var ocValue = document.getElementById('ocInput').value.trim();
+try {
 localStorage.setItem('law_api_oc', ocValue);
-alert("인증키가 브라우저에 저장되었습니다.");
+alert("인증키가 브라우저에 기억되었습니다.");
+} catch (e) {
+alert("⚠️ 현재 브라우저 보안 설정으로 인해 인증키 자동 저장이 차단되었습니다. 매번 입력이 필요할 수 있습니다.");
+}
 }
 
-// 로그 관련 제어 함수들
 function clearLog() {
-const logBox = document.getElementById('logBox');
+var logBox = document.getElementById('logBox');
 logBox.innerHTML = '';
 logBox.style.display = 'block';
 }
 
-function addLog(message, type = 'info') {
-const logBox = document.getElementById('logBox');
-const line = document.createElement('div');
-line.className = log-line log-${type}`;
+function addLog(message, type) {
+if (!type) type = 'info';
+var logBox = document.getElementById('logBox');
+var line = document.createElement('div');
+line.className = 'log-line log-' + type;
 
-const timestamp = new Date().toLocaleTimeString();
-line.innerText = [${timestamp}] ${message};
+var timestamp = new Date().toLocaleTimeString();
+line.innerText = '[' + timestamp + '] ' + message;
 
 logBox.appendChild(line);
-logBox.scrollTop = logBox.scrollHeight; // 스크롤 늘 하단 유지
+logBox.scrollTop = logBox.scrollHeight;
 }
 
 function extractCaseNumbers(text) {
-const caseRegex = /\d{2,4}[가-힣]{1,3}\d+/g;
-const matches = text.match(caseRegex) || [];
-return [...new Set(matches)];
+var caseRegex = /\d{2,4}[가-힣]{1,3}\d+/g;
+var matches = text.match(caseRegex) || [];
+return matches.filter(function(item, pos) {
+return matches.indexOf(item) == pos;
+});
 }
 
-// 실시간 법제처 API 연동 및 로그 출력
+// 하위 호환성을 위해 모든 ?. 문법을 표준 조건문 형식으로 변환
 async function fetchCaseTextReal(caseNum) {
-const OC = document.getElementById('ocInput').value.trim();
+var OC = document.getElementById('ocInput').value.trim();
 if (!OC) {
 throw new Error("우측 상단의 '인증키(oc)' 가 비어 있습니다.");
 }
 
-const proxy = "https://api.allorigins.win/raw?url=";
-const parser = new DOMParser();
+var proxy = "https://api.allorigins.win/raw?url=";
+var parser = new DOMParser();
 
-addLog([${caseNum}] 법제처 1차 검색 시작 (일련번호 확인 중)...); const searchUrl =https://www.law.go.kr/DRF/lawSearch.do?OC=
+addLog("[" + caseNum + "] 법제처 1차 검색 시작 (일련번호 확인 중)...");
+var searchUrl = "https://www.law.go.kr/DRF/lawSearch.do?OC=" + OC + "&target=prec&type=XML&query=" + encodeURIComponent(caseNum);
 
-{encodeURIComponent(caseNum)}`;
-
-const searchResponse = await fetch(proxy + encodeURIComponent(searchUrl));
+var searchResponse = await fetch(proxy + encodeURIComponent(searchUrl));
 if (!searchResponse.ok) throw new Error("법제처 1차 서버 통신에 실패했습니다.");
 
-const searchText = await searchResponse.text();
-const searchDoc = parser.parseFromString(searchText, "text/xml");
+var searchText = await searchResponse.text();
+var searchDoc = parser.parseFromString(searchText, "text/xml");
 
-const precSeqEl = searchDoc.querySelector("precSeq");
+var precSeqEl = searchDoc.querySelector("precSeq");
 if (!precSeqEl) {
-throw new Error(법제처 데이터베이스에 없는 판례번호입니다.);
+throw new Error("법제처 데이터베이스에 없는 판례번호입니다.");
 }
-const precSeq = precSeqEl.textContent;
-addLog([${caseNum}] 일련번호 확인 완료 (ID: ${precSeq}). 전문 매칭 시작..., 'success');
+var precSeq = precSeqEl.textContent;
+addLog("[" + caseNum + "] 일련번호 확인 완료 (ID: " + precSeq + "). 전문 매칭 시작...", "success");
 
-// 2차 상세 전문 조회
-const detailUrl = https://www.law.go.kr/DRF/lawService.do?OC=${OC}&target=prec&ID=${precSeq}&type=XML;
-const detailResponse = await fetch(proxy + encodeURIComponent(detailUrl));
+var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=prec&ID=" + precSeq + "&type=XML";
+var detailResponse = await fetch(proxy + encodeURIComponent(detailUrl));
 if (!detailResponse.ok) throw new Error("법제처 2차 서버(전문 조회) 통신에 실패했습니다.");
 
-const detailText = await detailResponse.text();
-const detailDoc = parser.parseFromString(detailText, "text/xml");
+var detailText = await detailResponse.text();
+var detailDoc = parser.parseFromString(detailText, "text/xml");
 
-const courtName = detailDoc.querySelector("법원명")?.textContent || "";
-const sentenceDate = detailDoc.querySelector("선고일자")?.textContent || "";
-const caseNumber = detailDoc.querySelector("사건번호")?.textContent || "";
-const caseName = detailDoc.querySelector("사건명")?.textContent || "";
+var courtNameEl = detailDoc.querySelector("법원명");
+var sentenceDateEl = detailDoc.querySelector("선고일자");
+var caseNumberEl = detailDoc.querySelector("사건번호");
+var caseNameEl = detailDoc.querySelector("사건명");
 
-const cleanText = (str) => str ? str.replace(/<[^>]*>/g, '').trim() : "";
+var courtName = courtNameEl ? courtNameEl.textContent : "";
+var sentenceDate = sentenceDateEl ? sentenceDateEl.textContent : "";
+var caseNumber = caseNumberEl ? caseNumberEl.textContent : "";
+var caseName = caseNameEl ? caseNameEl.textContent : "";
 
-const summary1 = cleanText(detailDoc.querySelector("판시사항")?.textContent);
-const summary2 = cleanText(detailDoc.querySelector("판결요지")?.textContent);
-const reasons = cleanText(detailDoc.querySelector("이유")?.textContent);
+var cleanText = function(str) {
+return str ? str.replace(/<[^>]*>/g, '').trim() : "";
+};
 
-let fullText = ${courtName} ${sentenceDate} 선고 ${caseNumber} 판결 [${caseName}]\n\n;
-if (summary1) fullText += 【판시사항】\n${summary1}\n\n; if (summary2) fullText +=【판결요지】\n${summary2}\n\n;
-if (reasons) fullText += 【이유】\n${reasons}`;
+var s1El = detailDoc.querySelector("판시사항");
+var s2El = detailDoc.querySelector("판결요지");
+var rEl = detailDoc.querySelector("이유");
 
-addLog([${caseNum}] 본문 추출 및 규격화 성공`, 'success');
+var summary1 = cleanText(s1El ? s1El.textContent : "");
+var summary2 = cleanText(s2El ? s2El.textContent : "");
+var reasons = cleanText(rEl ? rEl.textContent : "");
+
+var fullText = courtName + " " + sentenceDate + " 선고 " + caseNumber + " 판결 [" + caseName + "]\n\n";
+if (summary1) fullText += "【판시사항】\n" + summary1 + "\n\n";
+if (summary2) fullText += "【판결요지】\n" + summary2 + "\n\n";
+if (reasons) fullText += "【이유】\n" + reasons;
+
+addLog("[" + caseNum + "] 본문 추출 및 규격화 성공", "success");
 return fullText;
 }
 
 async function handleDownload(type) {
 clearLog();
-const inputData = document.getElementById('searchInput').value;
+var inputData = document.getElementById('searchInput').value;
 addLog("입력 데이터 분석 중...");
 
-const caseList = extractCaseNumbers(inputData);
+var caseList = extractCaseNumbers(inputData);
 
 if (caseList.length === 0) {
 addLog("⚠️ 인식된 판례번호가 없습니다. 형식을 확인하세요.", "error");
 return;
 }
 
-addLog(총 [${caseList.length}개] 의 판례가 인식되었습니다: ${caseList.join(', ')});
+addLog("총 [" + caseList.length + "개] 의 판례가 인식되었습니다: " + caseList.join(', '));
 
-let collectedData = [];
-for (let caseNum of caseList) {
+var collectedData = [];
+for (var i = 0; i < caseList.length; i++) {
+var caseNum = caseList[i];
 try {
-const content = await fetchCaseTextReal(caseNum);
+var content = await fetchCaseTextReal(caseNum);
 collectedData.push({ title: caseNum, content: content });
 } catch (err) {
-addLog(❌ [${caseNum}] 실패: ${err.message}, 'error');
+addLog("❌ [" + caseNum + "] 실패: " + err.message, "error");
 }
 }
 
@@ -291,101 +315,111 @@ await downloadPDF(collectedData);
 
 function downloadTXT(data) {
 addLog("TXT 파일 포맷팅 구성 중...");
-let output = "";
-data.forEach((item, idx) => {
-output += item.content;
-if (idx < data.length - 1) {
+var output = "";
+for (var i = 0; i < data.length; i++) {
+output += data[i].content;
+if (i < data.length - 1) {
 output += "\n\n----------\n\n";
 }
-});
+}
 
-const blob = new Blob([output], { type: "text/plain;charset=utf-8" });
-const url = URL.createObjectURL(blob);
-const a = document.createElement("a");
+var blob = new Blob([output], { type: "text/plain;charset=utf-8" });
+var url = URL.createObjectURL(blob);
+var a = document.createElement("a");
 a.href = url;
-a.download = 판례모음_${new Date().toISOString().slice(0,10)}.txt`;
+a.download = "판례모음_" + new Date().toISOString().slice(0,10) + ".txt";
 a.click();
 URL.revokeObjectURL(url);
-addLog("🎉 TXT 파일 다운로드 명령이 브라우저에 전달되었습니다.", "success");
+addLog("🎉 TXT 파일 다운로드 완료!", "success");
 }
 
 async function fetchFontAsBase64(url) {
 addLog("구글 오픈소스 서체 서버 연결 시도 중...");
 try {
-const response = await fetch(url);
-if(!response.ok) throw new Error("서체 다운로드 응답 상태 불안정");
-const blob = await response.blob();
-return new Promise((resolve, reject) => {
-const reader = new FileReader();
-reader.onloadend = () => resolve(reader.result.split(',')[1]);
-reader.onerror = () => reject(new Error("바이너리 변환 실패"));
+var response = await fetch(url);
+if(!response.ok) throw new Error("서체 다운로드 실패");
+var blob = await response.blob();
+return new Promise(function(resolve, reject) {
+var reader = new FileReader();
+reader.onloadend = function() { resolve(reader.result.split(',')[1]); };
+reader.onerror = function() { reject(new Error("바이너리 변환 실패")); };
 reader.readAsDataURL(blob);
 });
 } catch (e) {
-throw new Error(서체 로드 실패 (${e.message}). 로컬 파일(file://) 환경일 경우 브라우저 보안 정책에 의해 외부 서체 fetch가 차단될 수 있습니다. GitHub에 배포하면 정상 작동합니다.`);
+throw new Error("서체 허브 통신 지연 (" + e.message + ")");
 }
 }
 
 async function downloadPDF(data) {
 addLog("PDF 생성 프로세스 가동...");
 try {
-const fontUrl = "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansKR/NotoSansKR-Regular.ttf";
-const fontBase64 = await fetchFontAsBase64(fontUrl);
-addLog("구글 서체 인코딩 완료. PDF 빌더 인젝션 시작...", "success");
+if (!window.jspdf) {
+throw new Error("jsPDF 라이브러리가 유실되었습니다. 네트워크 연결 혹은 광고 차단 앱 상태를 확인하세요.");
+}
 
-const { jsPDF } = window.jspdf;
-const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+var fontUrl = "https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansKR/NotoSansKR-Regular.ttf";
+var fontBase64 = await fetchFontAsBase64(fontUrl);
+addLog("구글 서체 빌드 완료. 레이아웃 인젝션 시작...", "success");
+
+var jsPDF = window.jspdf.jsPDF;
+var doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
 doc.addFileToVFS("GoogleSansKR.ttf", fontBase64);
 doc.addFont("GoogleSansKR.ttf", "GoogleSansKR", "normal");
 doc.setFont("GoogleSansKR");
 
-const margin = 10;
-const pageWidth = 210;
-const pageHeight = 297;
-const printWidth = pageWidth - (margin * 2);
-const bottomLimit = pageHeight - margin;
+var margin = 10;
+var pageWidth = 210;
+var pageHeight = 297;
+var printWidth = pageWidth - (margin * 2);
+var bottomLimit = pageHeight - margin;
 
-const fontSizeTitle = 15;
-const fontSizeBody = 11;
+var fontSizeTitle = 15;
+var fontSizeBody = 11;
 
-const lineHeightTitle = fontSizeTitle * 0.3528 * 2.0;
-const lineHeightBody = fontSizeBody * 0.3528 * 2.0;
+var lineHeightTitle = fontSizeTitle * 0.3528 * 2.0;
+var lineHeightBody = fontSizeBody * 0.3528 * 2.0;
 
-data.forEach((item, index) => {
-if (index > 0) doc.addPage();
-addLog([${item.title}] PDF 레이아웃 드로잉 중 (A4, 마진 10mm, 행간 2.0)...`);
+for (var i = 0; i < data.length; i++) {
+var item = data[i];
+if (i > 0) doc.addPage();
+addLog("[" + item.title + "] PDF 도면 배치 중 (A4, 마진 10mm, 행간 2.0)...");
 
-let currentY = margin + 5;
+var currentY = margin + 5;
 
 doc.setFontSize(fontSizeTitle);
 doc.text(item.title, margin, currentY);
 currentY += lineHeightTitle + 3;
 
 doc.setFontSize(fontSizeBody);
-const paragraphs = item.content.split('\n');
+var paragraphs = item.content.split('\n');
 
-paragraphs.forEach(para => {
+for (var j = 0; j < paragraphs.length; j++) {
+var para = paragraphs[j];
 if (para.trim() === "") {
 currentY += lineHeightBody;
-return;
+continue;
 }
 
-const lines = doc.splitTextToSize(para, printWidth);
-lines.forEach(line => {
+var lines = doc.splitTextToSize(para, printWidth);
+for (var k = 0; k < lines.length; k++) {
 if (currentY > bottomLimit) {
 doc.addPage();
 currentY = margin + 10;
 }
-doc.text(line, margin, currentY);
+doc.text(lines[k], margin, currentY);
 currentY += lineHeightBody;
-});
+}
 currentY += lineHeightBody;
-});
-});
+}
+}
 
-addLog("PDF 렌더링 마감 중. 다운로드 실행...");
-doc.save(판례모음_${new Date().toISOString().slice(0,10)}.pdf); addLog("🎉 PDF 파일 다운로드가 완료되었습니다!", "success"); } catch (error) { addLog(❌ PDF 단계 오류: ${error.message}`, 'error');
+addLog("PDF 파일 인코딩 및 스트림 마감 중...");
+doc.save("판례모음_" + new Date().toISOString().slice(0,10) + ".pdf");
+addLog("🎉 PDF 파일 다운로드 완료!", "success");
+} catch (error) {
+addLog("❌ PDF 최종 결합 실패: " + error.message, 'error');
+alert("PDF 처리 에러: " + error.message);
 }
 }
 </script>
