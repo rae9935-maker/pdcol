@@ -8,13 +8,24 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
+        /* 내 저장소에 올라온 Google Sans 원격 서체를 웹 화면 UI 전체에 최우선 임베딩 */
+        @font-face {
+            font-family: 'Google Sans Custom';
+            src: url('./GoogleSans-VariableFont_GRAD,opsz,wght.ttf') format('truetype');
+            font-weight: 100 900;
+            font-style: normal;
+        }
+
         * {
             box-sizing: border-box;
         }
+        
         body {
             margin: 0;
             padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Google Sans Custom', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-optical-sizing: auto;
+            font-style: normal;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -23,6 +34,7 @@
             background-color: #fafafa;
             color: #202124;
         }
+        
         .search-container {
             text-align: center;
             width: 100%;
@@ -309,7 +321,6 @@
         throw new Error("모든 우회 통신망이 법제처 서버와 연결하는 데 실패했습니다.");
     }
 
-    // 전용 정밀 정규식 태그 스캔 엔진
     function getXmlTagValue(text, tagName) {
         var regex = new RegExp("<" + tagName + "[^>]*>([\\s\\S]*?)<\/" + tagName + ">", "i");
         var match = text.match(regex);
@@ -325,62 +336,69 @@
             throw new Error("우측 상단의 '인증키(oc)' 가 비어 있습니다.");
         }
 
-        // 1차 인덱싱 요청
         var searchUrl = "https://www.law.go.kr/DRF/lawSearch.do?OC=" + OC + "&target=prec&type=XML&query=" + encodeURIComponent(caseNum);
         var searchResponse = await fetchWithFallback(searchUrl, caseNum);
         
         var arrayBuffer = await searchResponse.arrayBuffer();
+        var utf8Decoder = new TextDecoder('utf-8');
+        var searchText = utf8Decoder.decode(arrayBuffer);
         
-        // 공공 API 표준 인코딩 해독망 가동 (EUC-KR 강제 매칭으로 깨짐 완전 방지)
-        var eucKrDecoder = new TextDecoder('euc-kr');
-        var searchText = eucKrDecoder.decode(arrayBuffer);
-        
-        // 만약 EUC-KR 해독본이 깨졌을 경우 UTF-8 교차 검증
-        if (searchText.includes("parsererror") || !searchText.includes("target")) {
-            var utf8Decoder = new TextDecoder('utf-8');
-            searchText = utf8Decoder.decode(arrayBuffer);
+        if (!searchText.includes("PrecSearch") && !searchText.includes("precSearch")) {
+            var eucKrDecoder = new TextDecoder('euc-kr');
+            searchText = eucKrDecoder.decode(arrayBuffer);
         }
         
-        // 엉뚱한 혼동 코드를 차단하기 위해 정확히 태그 쌍 내부의 순수 일련번호만 축출
-        var precSeq = getXmlTagValue(searchText, "precSeq");
-        if (!precSeq) {
-            precSeq = getXmlTagValue(searchText, "판례일련번호");
+        var precBlocks = searchText.match(/<prec[^>]*>([\s\S]*?)<\/prec>/gi) || [];
+        var precSeq = "";
+        var cleanTargetCase = caseNum.replace(/\s+/g, "");
+        
+        addLog("[" + caseNum + "] 검색 결과 목록 검증 중 (총 " + precBlocks.length + "건 발견)...");
+        
+        for (var i = 0; i < precBlocks.length; i++) {
+            var block = precBlocks[i];
+            var blockCaseNum = (getXmlTagValue(block, "사건번호") || getXmlTagValue(block, "caseNumber")).replace(/\s+/g, "");
+            
+            if (blockCaseNum === cleanTargetCase) {
+                precSeq = getXmlTagValue(block, "precSeq") || getXmlTagValue(block, "판례일련번호");
+                if (precSeq) {
+                    addLog("[" + caseNum + "] 타겟 사건번호 일치 단락 식별 성공 (ID: " + precSeq + ")", "success");
+                    break;
+                }
+            }
+        }
+        
+        if (!precSeq && precBlocks.length > 0) {
+            precSeq = getXmlTagValue(precBlocks[0], "precSeq") || getXmlTagValue(precBlocks[0], "판례일련번호");
+            addLog("[" + caseNum + "] ⚠️ 정확히 일치하는 사건번호 노드를 찾지 못해 첫 번째 검색 결과 코드로 속행합니다 (ID: " + precSeq + ")", "warn");
         }
         
         if (!precSeq) {
             var errMsg = getXmlTagValue(searchText, "errMsg");
             if (errMsg) throw new Error("법제처 리포트오류: " + errMsg);
             
-            var cleanSnippet = searchText.substring(0, 500).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            addLog("📋 [서버 응답 원본 백업]: " + cleanSnippet, "debug");
+            var cleanSnippet = searchText.substring(0, 1000).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            addLog("📋 [서버 응답 원본 백업 (1000자)]: " + cleanSnippet, "debug");
             throw new Error("판례 식별 정보를 파싱하지 못했습니다. 입력값 혹은 인증키를 점검하세요.");
         }
-        addLog("[" + caseNum + "] 판례 식별 코드 정밀 매칭 성공 (ID: " + precSeq + ")", "success");
 
-        // 2차 전문 본문 수집 요청
         var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=prec&ID=" + precSeq + "&type=XML";
         var detailResponse = await fetchWithFallback(detailUrl, caseNum);
         
         var detailBuffer = await detailResponse.arrayBuffer();
-        var detailText = eucKrDecoder.decode(detailBuffer);
+        var detailText = utf8Decoder.decode(detailBuffer);
         
         if (!detailText.includes("법원명") && !detailText.includes("사건번호")) {
-            var utf8Decoder = new TextDecoder('utf-8');
-            detailText = utf8Decoder.decode(detailBuffer);
+            var eucKrDecoder = new TextDecoder('euc-kr');
+            detailText = eucKrDecoder.decode(detailBuffer);
         }
 
         var courtName = getXmlTagValue(detailText, "법원명");
         var sentenceDate = getXmlTagValue(detailText, "선고일자");
         var caseNumber = getXmlTagValue(detailText, "사건번호");
-        var caseName = getXmlValueFromHTMLOrXML(detailText, "사건명");
+        var caseName = getXmlTagValue(detailText, "사건명");
         
-        function getXmlValueFromHTMLOrXML(txt, tag) {
-            return getXmlTagValue(txt, tag);
-        }
-
         var cleanText = function(str) {
             if (!str) return "";
-            // HTML 태그 제거 및 불필요한 공백 제거
             return str.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
         };
 
@@ -393,7 +411,7 @@
         if (summary2) fullText += "【판결요지】\n" + summary2 + "\n\n";
         if (reasons) fullText += "【이유】\n" + reasons;
 
-        addLog("[" + caseNum + "] 본문 복사 및 유니코드 복원 완료", "success");
+        addLog("[" + caseNum + "] 본문 텍스트 디코딩 및 완벽 추출 성공", "success");
         return fullText;
     }
 
@@ -444,7 +462,6 @@
             }
         }
 
-        // 유니코드 변환 깨짐을 막기 위해 BOM 추가 및 데이터 정렬
         var blob = new Blob(["\uFEFF" + output], { type: "text/plain;charset=utf-8" });
         var url = URL.createObjectURL(blob);
         var a = document.createElement("a");
@@ -456,10 +473,10 @@
     }
 
     async function fetchFontAsBase64(url) {
-        addLog("구글 초경량 고속 서체 서버 연결 중...");
+        addLog("내 GitHub 저장소 내부의 Google Sans 서체 빌드 시도 중...");
         try {
             var response = await fetch(url);
-            if(!response.ok) throw new Error("서체 다운로드 실패");
+            if(!response.ok) throw new Error("내 저장소 안에 지정한 이름의 Google Sans 서체 파일(.ttf)이 없거나 경로 불일치 오류가 발생했습니다.");
             var blob = await response.blob();
             return new Promise(function(resolve, reject) {
                 var reader = new FileReader();
@@ -468,7 +485,7 @@
                 reader.readAsDataURL(blob);
             });
         } catch (e) {
-            addLog("⚠️ 구글 원격 서체 로드 실패로 시스템 폰트로 대체 구성합니다.", "warn");
+            addLog("⚠️ 내 저장소 서체 로드 실패 (" + e.message + "). 시스템 기본 폰트로 대체 구성합니다.", "warn");
             return null;
         }
     }
@@ -476,18 +493,18 @@
     async function downloadPDF(data) {
         addLog("PDF 컴파일러 런타임 가동...");
         try {
-            // 용량 무제한 전체 서체가 아닌 구글 공식 가볍고 빠른 경량화(Subset) 주소로 선회 우회
-            var fontUrl = "https://fonts.gstatic.com/ea/notosanskr/v2/NotoSansKR-Regular.ttf";
+            // [수정 포인트] 사용자가 다운로드받은 정확한 원본 구글 산스 폰트 명칭 매칭 선언
+            var fontUrl = "./GoogleSans-VariableFont_GRAD,opsz,wght.ttf";
             var fontBase64 = await fetchFontAsBase64(fontUrl);
 
             var jsPDF = window.jspdf.jsPDF;
             var doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
             if (fontBase64) {
-                doc.addFileToVFS("GoogleSansKR.ttf", fontBase64);
-                doc.addFont("GoogleSansKR.ttf", "GoogleSansKR", "normal");
-                doc.setFont("GoogleSansKR");
-                addLog("구글 서체 완벽 주입 완료.", "success");
+                doc.addFileToVFS("GoogleSans.ttf", fontBase64);
+                doc.addFont("GoogleSans.ttf", "GoogleSans", "normal");
+                doc.setFont("GoogleSans");
+                addLog("정적 저장소 Google Sans 서체 결합 완료.", "success");
             }
 
             var margin = 10;
@@ -505,7 +522,7 @@
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
                 if (i > 0) doc.addPage();
-                addLog("[" + item.title + "] PDF 가독성 서식 도면 드로잉 중 (줄간격 2.0)...");
+                addLog("[" + item.title + "] PDF 표준 규격 도면 배치 중 (A4, 마진 10mm, 행간 2.0)...");
 
                 var currentY = margin + 5;
 
@@ -536,7 +553,7 @@
                 }
             }
 
-            addLog("PDF 최종 스트림 직렬화 마감 중...");
+            addLog("PDF 바이너리 스트림 변환 완료. 기기로 배출 중...");
             doc.save("판례모음_" + new Date().toISOString().slice(0,10) + ".pdf");
             addLog("🎉 PDF 회독용 파일 다운로드가 정상 완료되었습니다.", "success");
         } catch (error) {
