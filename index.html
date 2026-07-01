@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>판례 검색기</title>
     
-    <!-- jsPDF 라이브러리 로드 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
@@ -99,7 +98,6 @@
             color: #202124;
         }
         
-        /* 로그 영역 래퍼 및 복사 버튼 레이아웃 */
         .log-wrapper {
             margin-top: 25px;
             text-align: left;
@@ -119,7 +117,7 @@
         }
         .copy-btn {
             margin: 0;
-            padding: 4px 10px;
+            padding: 5px 12px;
             font-size: 11px;
             background-color: #ffffff;
             border: 1px solid #dadce0;
@@ -184,7 +182,6 @@
         <button onclick="handleDownload('pdf')">PDF 파일 다운로드</button>
     </div>
     
-    <!-- 복사 버튼이 포함된 실시간 로그 영역 -->
     <div id="logWrapper" class="log-wrapper">
         <div class="log-header">
             <span class="log-title">실시간 구동 로그</span>
@@ -240,7 +237,6 @@
         logBox.scrollTop = logBox.scrollHeight;
     }
 
-    // [추가 기능] 로그 전체 복사 함수 (구형 태블릿/모바일 기기 전용 폴백 포함)
     function copyLog() {
         var logBox = document.getElementById('logBox');
         if (!logBox) return;
@@ -248,7 +244,7 @@
 
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(logText).then(function() {
-                alert("로그가 클립보드에 복사되었습니다! 그대로 전달해 주세요.");
+                alert("로그가 클립보드에 복사되었습니다!");
             }).catch(function() {
                 fallbackCopy(logText);
             });
@@ -265,7 +261,7 @@
         textarea.select();
         try {
             document.execCommand("copy");
-            alert("로그가 성공적으로 복사되었습니다!");
+            alert("로그가 클립보드에 복사되었습니다!");
         } catch (err) {
             alert("복사에 실패했습니다. 직접 드래그하여 복사해 주세요.");
         }
@@ -313,6 +309,35 @@
         throw new Error("모든 우회 통신망이 법제처 서버와 연결하는 데 실패했습니다.");
     }
 
+    // [초기력 고도화] DOM 파싱 제약을 무력화하는 무적형 하이브리드 값 추출기
+    var getXmlValueInvincible = function(doc, tagName, rawText) {
+        try {
+            // 1. 표준 대소문자 DOM 파싱 시도
+            var elements = doc.getElementsByTagName(tagName);
+            if (elements && elements.length > 0) return elements[0].textContent.trim();
+            
+            // 2. 완전 소문자 DOM 파싱 시도
+            elements = doc.getElementsByTagName(tagName.toLowerCase());
+            if (elements && elements.length > 0) return elements[0].textContent.trim();
+
+            // 3. 완전 대문자 DOM 파싱 시도
+            elements = doc.getElementsByTagName(tagName.toUpperCase());
+            if (elements && elements.length > 0) return elements[0].textContent.trim();
+        } catch(e) {}
+
+        // 4. 최후의 수단: 문자열 정규식(Regex) 대소문자 구분 없이 강제 추적
+        if (rawText) {
+            try {
+                var regex = new RegExp("<" + tagName + "[^>]*>([\\s\\S]*?)<\/" + tagName + ">", "i");
+                var match = rawText.match(regex);
+                if (match && match[1]) {
+                    return match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").trim();
+                }
+            } catch(e) {}
+        }
+        return "";
+    };
+
     async function fetchCaseTextReal(caseNum) {
         var OC = document.getElementById('ocInput').value.trim();
         if (!OC) {
@@ -320,33 +345,26 @@
         }
 
         var parser = new DOMParser();
-        var getXmlValue = function(doc, tagName) {
-            var elements = doc.getElementsByTagName(tagName);
-            return (elements && elements.length > 0) ? elements[0].textContent : "";
-        };
 
         // 1차 인덱싱 요청
         var searchUrl = "https://www.law.go.kr/DRF/lawSearch.do?OC=" + OC + "&target=prec&type=XML&query=" + encodeURIComponent(caseNum);
         var searchResponse = await fetchWithFallback(searchUrl, caseNum);
         
         var arrayBuffer = await searchResponse.arrayBuffer();
-        
-        // UTF-8로 먼저 정상 해독 수행
         var utf8Decoder = new TextDecoder('utf-8');
         var searchText = utf8Decoder.decode(arrayBuffer);
         var searchDoc = parser.parseFromString(searchText, "text/xml");
         
-        // [수정 핵심] 강제 EUC-KR 오작동 검증 로직 필터링 최적화
-        if (searchDoc.getElementsByTagName("parsererror").length > 0 || searchDoc.getElementsByTagName("PrecSearch").length === 0) {
-            addLog("[" + caseNum + "] 인코딩 보정 가동 (EUC-KR 변환 중)...", "warn");
-            var eucKrDecoder = new TextDecoder('euc-kr');
-            searchText = eucKrDecoder.decode(arrayBuffer);
-            searchDoc = parser.parseFromString(searchText, "text/xml");
+        // 1차 영문 식별값 추출 시도
+        var precSeq = getXmlValueInvincible(searchDoc, "precSeq", searchText);
+        
+        // 검색 실패 시 한글 태그 교차 백업 검증 가동
+        if (!precSeq) {
+            precSeq = getXmlValueInvincible(searchDoc, "판례일련번호", searchText);
         }
         
-        var precSeq = getXmlValue(searchDoc, "precSeq");
         if (!precSeq) {
-            var errMsg = getXmlValue(searchDoc, "errMsg");
+            var errMsg = getXmlValueInvincible(searchDoc, "errMsg", searchText);
             if (errMsg) throw new Error("법제처 리포트오류: " + errMsg);
             
             var cleanSnippet = searchText.substring(0, 150).replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -354,7 +372,7 @@
             
             throw new Error("판례 식별 정보를 파싱하지 못했습니다. 입력값 혹은 인증키를 점검하세요.");
         }
-        addLog("[" + caseNum + "] 판례 식별 코드 매칭 완료 (ID: " + precSeq + ")", "success");
+        addLog("[" + caseNum + "] 하이브리드 파싱을 통해 판례 고유 코드 확보 성공 (ID: " + precSeq + ")", "success");
 
         // 2차 전문 본문 수집 요청
         var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=prec&ID=" + precSeq + "&type=XML";
@@ -363,25 +381,19 @@
         var detailBuffer = await detailResponse.arrayBuffer();
         var detailText = utf8Decoder.decode(detailBuffer);
         var detailDoc = parser.parseFromString(detailText, "text/xml");
-        
-        if (detailDoc.getElementsByTagName("parsererror").length > 0 || detailDoc.getElementsByTagName("PrecService").length === 0) {
-            var eucKrDecoder = new TextDecoder('euc-kr');
-            detailText = eucKrDecoder.decode(detailBuffer);
-            detailDoc = parser.parseFromString(detailText, "text/xml");
-        }
 
-        var courtName = getXmlValue(detailDoc, "법원명");
-        var sentenceDate = getXmlValue(detailDoc, "선고일자");
-        var caseNumber = getXmlValue(detailDoc, "사건번호");
-        var caseName = getXmlValue(detailDoc, "사건명");
+        var courtName = getXmlValueInvincible(detailDoc, "법원명", detailText);
+        var sentenceDate = getXmlValueInvincible(detailDoc, "선고일자", detailText);
+        var caseNumber = getXmlValueInvincible(detailDoc, "사건번호", detailText);
+        var caseName = getXmlValueInvincible(detailDoc, "사건명", detailText);
         
         var cleanText = function(str) {
             return str ? str.replace(/<[^>]*>/g, '').trim() : "";
         };
 
-        var summary1 = cleanText(getXmlValue(detailDoc, "판시사항"));
-        var summary2 = cleanText(getXmlValue(detailDoc, "판결요지"));
-        var reasons = cleanText(getXmlValue(detailDoc, "이유"));
+        var summary1 = cleanText(getXmlValueInvincible(detailDoc, "판시사항", detailText));
+        var summary2 = cleanText(getXmlValueInvincible(detailDoc, "판결요지", detailText));
+        var reasons = cleanText(getXmlValueInvincible(detailDoc, "이유", detailText));
 
         var fullText = courtName + " " + sentenceDate + " 선고 " + caseNumber + " 판결 [" + caseName + "]\n\n";
         if (summary1) fullText += "【판시사항】\n" + summary1 + "\n\n";
