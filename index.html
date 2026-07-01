@@ -8,11 +8,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
-        /* 내 저장소에 올라온 Google Sans 원격 서체를 웹 화면 UI 전체에 최우선 임베딩 */
+        /* 정적(Static) Google Sans 폰트를 웹 화면 UI 전체에 임베딩 */
         @font-face {
-            font-family: 'Google Sans Custom';
-            src: url('./GoogleSans-VariableFont_GRAD,opsz,wght.ttf') format('truetype');
-            font-weight: 100 900;
+            font-family: 'Google Sans Static';
+            src: url('./GoogleSans-Regular.ttf') format('truetype');
+            font-weight: normal;
             font-style: normal;
         }
 
@@ -23,9 +23,7 @@
         body {
             margin: 0;
             padding: 0;
-            font-family: 'Google Sans Custom', -apple-system, BlinkMacSystemFont, sans-serif;
-            font-optical-sizing: auto;
-            font-style: normal;
+            font-family: 'Google Sans Static', -apple-system, BlinkMacSystemFont, sans-serif;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -164,7 +162,7 @@
         .log-error { color: #c5221f; font-weight: bold; }
         .log-info { color: #1a73e8; }
         .log-warn { color: #b06000; font-weight: bold; }
-        .log-debug { color: #6c757d; font-style: italic; background-color: #e9ecef; padding: 4px 8px; border-radius: 4px; display: block; margin-top: 5px; }
+        .log-debug { color: #6c757d; font-style: italic; background-color: #e9ecef; padding: 2px 4px; border-radius: 4px; }
 
         .info-text {
             margin-top: 35px;
@@ -300,9 +298,7 @@
             var proxyName = i === 0 ? "고속망(CorsProxy)" : i === 1 ? "기본망(CodeTabs)" : "비상망(AllOrigins)";
             
             try {
-                addLog("[" + caseNum + "] " + proxyName + " 통신망 접속 시도 중...");
                 var finalUrl = currentProxy + encodeURIComponent(targetUrl);
-                
                 var controller = new AbortController();
                 var id = setTimeout(function() { controller.abort(); }, 6000);
                 
@@ -311,12 +307,8 @@
                 
                 if (res.ok) {
                     return res;
-                } else {
-                    addLog("⚠️ " + proxyName + " 응답 실패 (Status: " + res.status + ")", "warn");
                 }
-            } catch (e) {
-                addLog("⚠️ " + proxyName + " 연결 실패 또는 타임아웃 발생", "warn");
-            }
+            } catch (e) {}
         }
         throw new Error("모든 우회 통신망이 법제처 서버와 연결하는 데 실패했습니다.");
     }
@@ -352,7 +344,7 @@
         var precSeq = "";
         var cleanTargetCase = caseNum.replace(/\s+/g, "");
         
-        addLog("[" + caseNum + "] 검색 결과 목록 검증 중 (총 " + precBlocks.length + "건 발견)...");
+        addLog("[" + caseNum + "] 검색 목록 매칭 파싱 시작...");
         
         for (var i = 0; i < precBlocks.length; i++) {
             var block = precBlocks[i];
@@ -361,7 +353,6 @@
             if (blockCaseNum === cleanTargetCase) {
                 precSeq = getXmlTagValue(block, "precSeq") || getXmlTagValue(block, "판례일련번호");
                 if (precSeq) {
-                    addLog("[" + caseNum + "] 타겟 사건번호 일치 단락 식별 성공 (ID: " + precSeq + ")", "success");
                     break;
                 }
             }
@@ -369,22 +360,18 @@
         
         if (!precSeq && precBlocks.length > 0) {
             precSeq = getXmlTagValue(precBlocks[0], "precSeq") || getXmlTagValue(precBlocks[0], "판례일련번호");
-            addLog("[" + caseNum + "] ⚠️ 정확히 일치하는 사건번호 노드를 찾지 못해 첫 번째 검색 결과 코드로 속행합니다 (ID: " + precSeq + ")", "warn");
         }
         
         if (!precSeq) {
             var errMsg = getXmlTagValue(searchText, "errMsg");
             if (errMsg) throw new Error("법제처 리포트오류: " + errMsg);
-            
-            var cleanSnippet = searchText.substring(0, 1000).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            addLog("📋 [서버 응답 원본 백업 (1000자)]: " + cleanSnippet, "debug");
-            throw new Error("판례 식별 정보를 파싱하지 못했습니다. 입력값 혹은 인증키를 점검하세요.");
+            throw new Error("판례 식별 정보를 파싱하지 못했습니다.");
         }
 
         var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=prec&ID=" + precSeq + "&type=XML";
         var detailResponse = await fetchWithFallback(detailUrl, caseNum);
         
-        var detailBuffer = await detailResponse.arrayBuffer();
+        var detailBuffer = await detailResponse.append ? await detailResponse.arrayBuffer() : await detailResponse.arrayBuffer();
         var detailText = utf8Decoder.decode(detailBuffer);
         
         if (!detailText.includes("법원명") && !detailText.includes("사건번호")) {
@@ -404,14 +391,25 @@
 
         var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
         var summary2 = cleanText(getXmlTagValue(detailText, "판결요지"));
-        var reasons = cleanText(getXmlTagValue(detailText, "이유"));
+        
+        // [구조 고도화] 독립된 이유 태그 외에 주문과 이유가 병합된 '전문' 데이터 레이어를 동시 추적
+        var textBody = cleanText(getXmlTagValue(detailText, "전문"));
+        if (!textBody) {
+            textBody = cleanText(getXmlTagValue(detailText, "이유"));
+            if (textBody) textBody = "【이유】\n" + textBody;
+        }
 
         var fullText = courtName + " " + sentenceDate + " 선고 " + caseNumber + " 판결 [" + caseName + "]\n\n";
         if (summary1) fullText += "【판시사항】\n" + summary1 + "\n\n";
         if (summary2) fullText += "【판결요지】\n" + summary2 + "\n\n";
-        if (reasons) fullText += "【이유】\n" + reasons;
+        
+        if (textBody) {
+            fullText += textBody;
+        } else {
+            fullText += "【이유】\n(※ 본 판례는 요약 정보만 제공되는 항목입니다.)";
+        }
 
-        addLog("[" + caseNum + "] 본문 텍스트 디코딩 및 완벽 추출 성공", "success");
+        addLog("[" + caseNum + "] 모든 문언 데이터 결합 및 규격화 성공", "success");
         return fullText;
     }
 
@@ -473,10 +471,10 @@
     }
 
     async function fetchFontAsBase64(url) {
-        addLog("내 GitHub 저장소 내부의 Google Sans 서체 빌드 시도 중...");
+        addLog("내 GitHub 저장소 내부의 Google Sans 정적 서체 로드 시도 중...");
         try {
             var response = await fetch(url);
-            if(!response.ok) throw new Error("내 저장소 안에 지정한 이름의 Google Sans 서체 파일(.ttf)이 없거나 경로 불일치 오류가 발생했습니다.");
+            if(!response.ok) throw new Error("내 저장소 안에 'GoogleSans-Regular.ttf' 파일이 없거나 경로 불일치 오류가 발생했습니다.");
             var blob = await response.blob();
             return new Promise(function(resolve, reject) {
                 var reader = new FileReader();
@@ -493,8 +491,7 @@
     async function downloadPDF(data) {
         addLog("PDF 컴파일러 런타임 가동...");
         try {
-            // [수정 포인트] 사용자가 다운로드받은 정확한 원본 구글 산스 폰트 명칭 매칭 선언
-            var fontUrl = "./GoogleSans-VariableFont_GRAD,opsz,wght.ttf";
+            var fontUrl = "./GoogleSans-Regular.ttf";
             var fontBase64 = await fetchFontAsBase64(fontUrl);
 
             var jsPDF = window.jspdf.jsPDF;
