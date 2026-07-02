@@ -245,16 +245,13 @@
         }, 3000);
     }
 
-    function warmUpProxies() {
-        var testTargets = [
-            "https://corsproxy.io/?https%3A%2F%2Fwww.law.go.kr",
-            "https://api.codetabs.com/v1/proxy?url=https%3A%2F%2Fwww.law.go.kr",
-            "https://api.allorigins.win/raw?url=https%3A%2F%2Fwww.law.go.kr"
-        ];
-        testTargets.forEach(function(url) {
-            fetch(url, { method: 'HEAD' }).catch(function(){});
-        });
-    }
+    // 프록시 헬스 체크 상태 및 스마트 라우팅용 전역 변수
+    var proxyHealth = {
+        "https://corsproxy.io/?": { fails: 0, lastFail: 0 },
+        "https://api.codetabs.com/v1/proxy?url=": { fails: 0, lastFail: 0 },
+        "https://api.allorigins.win/raw?url=": { fails: 0, lastFail: 0 }
+    };
+    window.lastSuccessfulProxy = sessionStorage.getItem('last_working_proxy') || "";
 
     window.onload = function() {
         try {
@@ -267,7 +264,6 @@
                 document.getElementById('ocInput').value = savedOC;
             }
             
-            warmUpProxies();
             window.caseDataCache = {};
         } catch (e) {}
     };
@@ -344,13 +340,8 @@
         });
     }
 
-    var proxyHealth = {
-        "https://corsproxy.io/?": { fails: 0, lastFail: 0 },
-        "https://api.codetabs.com/v1/proxy?url=": { fails: 0, lastFail: 0 },
-        "https://api.allorigins.win/raw?url=": { fails: 0, lastFail: 0 }
-    };
-
-    async function fetchWithFallback(targetUrl, caseNum) {
+    // 가용 프록시 정렬 알고리즘 (최근 성공 라우트를 0순위로 배치)
+    function getSmartOrderedProxies() {
         var proxies = [
             "https://corsproxy.io/?",
             "https://api.codetabs.com/v1/proxy?url=",
@@ -375,11 +366,22 @@
             activeProxies = proxies; 
         }
 
-        activeProxies.sort(function() { return Math.random() - 0.5; });
+        activeProxies.sort(function(a, b) {
+            if (a === window.lastSuccessfulProxy) return -1;
+            if (b === window.lastSuccessfulProxy) return 1;
+            return Math.random() - 0.5;
+        });
+
+        return activeProxies;
+    }
+
+    // 타임아웃 지연 최적화가 도입된 가용 라우트 스위칭 통신 로직
+    async function fetchWithFallback(targetUrl, caseNum) {
+        var activeProxies = getSmartOrderedProxies();
 
         for (var i = 0; i < activeProxies.length; i++) {
             if (i > 0) {
-                await new Promise(function(resolve) { setTimeout(resolve, 400); });
+                await new Promise(function(resolve) { setTimeout(resolve, 300); });
             }
 
             var currentProxy = activeProxies[i];
@@ -388,25 +390,46 @@
             try {
                 var finalUrl = currentProxy + encodeURIComponent(targetUrl);
                 var controller = new AbortController();
-                var id = setTimeout(function() { controller.abort(); }, 4000); 
+                
+                // 첫 번째 라우트(최근 성공 라우트)는 2.5초 타임아웃, 예비 회선은 4초 적용
+                var timeoutDuration = (i === 0) ? 2500 : 4000;
+                var id = setTimeout(function() { controller.abort(); }, timeoutDuration); 
                 
                 var res = await fetch(finalUrl, { signal: controller.signal });
                 clearTimeout(id);
                 if (res.ok) {
                     proxyHealth[currentProxy].fails = 0; 
+                    window.lastSuccessfulProxy = currentProxy;
+                    sessionStorage.setItem('last_working_proxy', currentProxy);
                     return res;
                 }
                 throw new Error("HTTP Status " + res.status);
             } catch (e) {
                 proxyHealth[currentProxy].fails++;
                 proxyHealth[currentProxy].lastFail = Date.now();
-                addLog("⚠️ [" + caseNum + "] " + proxyName + " 장애 감지. 대체 회선으로 우회 처리합니다.", "warn");
+                
+                if (currentProxy === window.lastSuccessfulProxy) {
+                    window.lastSuccessfulProxy = "";
+                    sessionStorage.removeItem('last_working_proxy');
+                }
+                addLog("⚠️ [" + caseNum + "] " + proxyName + " 장애 또는 지연 감지. 대체 회선으로 우회 처리합니다.", "warn");
             }
         }
         throw { type: "NETWORK_ERROR", message: "모든 CORS 우회 통신망이 일시적으로 차단되었거나 타임아웃 정체 상태입니다." };
     }
 
+    // DOMParser 파싱 및 하이브리드 정규식 예외 복구 기능이 결합된 안정적 파싱 기법
     function getXmlTagValue(text, tagName) {
+        try {
+            var parser = new DOMParser();
+            var xmlDoc = parser.parseFromString(text, "text/xml");
+            if (!xmlDoc.getElementsByTagName("parsererror").length) {
+                var element = xmlDoc.getElementsByTagName(tagName)[0];
+                if (element) return element.textContent.trim();
+            }
+        } catch (e) {}
+        
+        // XML 데이터 규격 오류 발생 시 예비 포지션으로 정규식 파싱 복구 트랙 가동
         var regex = new RegExp("<" + tagName + "[^>]*>([\\s\\S]*?)<\/" + tagName + ">", "i");
         var match = text.match(regex);
         if (match && match[1]) {
@@ -456,9 +479,7 @@
             formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관|대법원장|헌법재판소장|재판관)/g, "$1\n\n$3");
         }
 
-        // [★ 버그 완치]: 줄바꿈(\n)을 삼켜버리던 \s+ 대신 수평 공백 전용 정규식([ \t]+)으로 한정 격리 치환
         formatted = formatted.replace(/([.?!])[ \t]+([^\n])/g, "$1\n$2");
-
         formatted = formatted.replace(/〔DOT〕/g, ".");
         formatted = formatted.replace(/\n{3,}/g, "\n\n");
         
