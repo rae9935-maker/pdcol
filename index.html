@@ -456,8 +456,8 @@
             formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관|대법원장|헌법재판소장|재판관)/g, "$1\n\n$3");
         }
 
-        // 보호 구역 외부의 순수 문장 마침표군 정밀 감지 후 단일 개행 우회 인젝션
-        formatted = formatted.replace(/([.?!])\s+([^\n])/g, "$1\n$2");
+        // [★ 버그 완치]: 줄바꿈(\n)을 삼켜버리던 \s+ 대신 수평 공백 전용 정규식([ \t]+)으로 한정 격리 치환
+        formatted = formatted.replace(/([.?!])[ \t]+([^\n])/g, "$1\n$2");
 
         formatted = formatted.replace(/〔DOT〕/g, ".");
         formatted = formatted.replace(/\n{3,}/g, "\n\n");
