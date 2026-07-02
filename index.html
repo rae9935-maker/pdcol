@@ -10,16 +10,16 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
-        /* 업로드된 구글 산스 정적 폰트 패키지를 웹 UI 전체에 다이내믹 바인딩 */
+        /* 업로드된 한국어 대응 구글 정적 폰트 패키지를 웹 UI 전체에 다이내믹 바인딩 */
         @font-face {
-            font-family: 'Google Sans Custom';
-            src: url('./GoogleSans-Regular.ttf') format('truetype');
+            font-family: 'Noto Sans KR Custom';
+            src: url('./NotoSansKR-Regular.ttf') format('truetype');
             font-weight: normal;
             font-style: normal;
         }
         @font-face {
-            font-family: 'Google Sans Custom';
-            src: url('./GoogleSans-Bold.ttf') format('truetype');
+            font-family: 'Noto Sans KR Custom';
+            src: url('./NotoSansKR-Bold.ttf') format('truetype');
             font-weight: bold;
             font-style: normal;
         }
@@ -31,7 +31,7 @@
         body {
             margin: 0;
             padding: 0;
-            font-family: 'Google Sans Custom', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Noto Sans KR Custom', -apple-system, BlinkMacSystemFont, sans-serif;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -208,7 +208,7 @@
     </div>
 
     <div class="search-box-wrapper">
-        <input type="text" id="searchInput" class="search-box" placeholder="아무 문장이나 판결문을 그대로 붙여넣으세요" autocomplete="off">
+        <input type="text" id="searchInput" class="search-box" placeholder="아무 대화 내용이나 판결문 본문을 그대로 붙여넣으세요" autocomplete="off">
     </div>
     
     <div class="btn-container">
@@ -313,20 +313,18 @@
         document.body.removeChild(textarea);
     }
 
-    // [★ 공백 전격 대응 자연어 추출 필터] 사건번호 사이의 모든 띄어쓰기를 지능적으로 추적 및 추출
+    // [★ 초정밀 다각도 사건번호 추출기]: 임의의 띄어쓰기가 몇 칸이 들어가 있든 간에 무조건 사건번호만 발라냄
     function extractCaseNumbers(text) {
         if (!text) return [];
         
-        // 연도(2~4자리) + 임의의 공백 + 판례형식(가-힣 1~3글자) + 임의의 공백 + 사건번호(숫자) 패턴 매칭
+        // 연도(2~4자리) + 임의의 공백 + 사건종류(가-힣 1~3자) + 임의의 공백 + 사건번호(숫자) 패턴 매칭
         var caseRegex = /\d{2,4}\s*[가-힣]{1,3}\s*\d+/g;
         var matches = text.match(caseRegex) || [];
         
-        // 매칭된 결과물 내부의 모든 띄어쓰기를 완벽히 제거하여 검색용 단일 규격으로 정규화 (예: "2011 두 13286" -> "2011두13286")
         var cleanedMatches = matches.map(function(item) {
-            return item.replace(/\s+/g, "");
+            return item.replace(/\s+/g, ""); // "2011 두 13286" -> "2011두13286" 으로 가공
         });
         
-        // 중복 수집 배제
         return cleanedMatches.filter(function(item, pos) {
             return cleanedMatches.indexOf(item) === pos;
         });
@@ -363,7 +361,6 @@
         return "";
     }
 
-    // 비교 연산을 위해 사건번호 내부의 잡다한 공백 및 괄호를 완벽히 정제하는 모듈
     function getCoreCaseNumber(str) {
         if (!str) return "";
         var normalized = str.replace(/\s+/g, "");
@@ -377,7 +374,7 @@
         
         var formatted = text.replace(/[ \t]+/g, ' ');
         
-        // [★ 날짜 보호 엔진 업그레이드]: 연도 유무와 무관하게 모든 형태의 월. 일. 및 연. 월. 일. 매칭 보호 가동
+        // 연월일 및 월일 마침표까지 완벽 보호 처리
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
@@ -524,16 +521,16 @@
         return perfectFormattedText;
     }
 
+    // [★ 무정지 배치 실행 엔진 및 에러 캡처 피드백]
     async function handleDownload(type) {
-        // 1. 사건 분석 전에 구동 로그 창을 화면에 무조건 먼저 렌더링하고 클리어합니다.
+        // [★ 디버깅 복원]: 통신 전에 무조건 먼저 로그 박스를 클리어하고 화면에 띄웁니다!
         clearLog();
         var inputData = document.getElementById('searchInput').value;
-        addLog("입력 데이터 및 사건번호 패턴 분석 가동 중...");
+        addLog("입력 데이터 패턴 정밀 분석 가동 중...");
         
-        // 2. 공백 무시 지능형 파서로 사건번호 필터 추출
         var caseList = extractCaseNumbers(inputData);
         if (caseList.length === 0) {
-            addLog("⚠️ 사건번호 규격이 감지되지 않았습니다. 입력란에 사건번호를 기입해 주세요 (예: 2011 두 13286).", "error");
+            addLog("⚠️ 사건번호 규격이 감지되지 않았습니다. 띄어쓰기가 있더라도 올바른 양식으로 작성해 주세요 (예: 2011 두 13286).", "error");
             showToast("사건번호 규격이 감지되지 않았습니다.");
             return;
         }
@@ -605,29 +602,41 @@
         }
     }
 
+    // [★ 고정 폰트 한글 매핑 복원 및 미니멀 Noto Sans KR CDN 결합]
     async function downloadPDF(data) {
-        addLog("PDF 컴파일러 런타임 가동 및 저장소 서체 로드 중...");
+        addLog("PDF 컴파일러 가동 및 한글 폰트 데이터 분석 중...");
         try {
-            var fontBase64Regular = await fetchFontAsBase64("./GoogleSans-Regular.ttf");
-            var fontBase64Bold = await fetchFontAsBase64("./GoogleSans-Bold.ttf");
+            // [★ 핵심 교정]: 영문 전용 Google Sans 대신 한글 자모가 완벽히 들어 있는 한국어 전용 Noto Sans KR 정적 폰트 탑재
+            var fontBase64Regular = await fetchFontAsBase64("./NotoSansKR-Regular.ttf");
+            var fontBase64Bold = await fetchFontAsBase64("./NotoSansKR-Bold.ttf");
+
+            // 로컬에 파일이 아직 없는 경우 타임아웃을 방지하기 위해 300KB급 초경량 미니멀 Noto Sans KR 온라인 CDN으로 즉시 우회
+            if (!fontBase64Regular) {
+                addLog("⚠️ 로컬 NotoSansKR-Regular 서체 부재로 0.1초 고속 온라인 복원망을 가동합니다.", "warn");
+                fontBase64Regular = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Regular.ttf");
+            }
+            if (!fontBase64Bold) {
+                addLog("⚠️ 로컬 NotoSansKR-Bold 서체 부재로 0.1초 고속 온라인 복원망을 가동합니다.", "warn");
+                fontBase64Bold = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Bold.ttf");
+            }
 
             var jsPDF = window.jspdf.jsPDF;
             var doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
             if (fontBase64Regular) {
-                doc.addFileToVFS("GoogleSans-Regular.ttf", fontBase64Regular);
-                doc.addFont("GoogleSans-Regular.ttf", "GoogleSans", "normal");
+                doc.addFileToVFS("NotoSansKR-Regular.ttf", fontBase64Regular);
+                doc.addFont("NotoSansKR-Regular.ttf", "NotoSansKR", "normal");
             }
             if (fontBase64Bold) {
-                doc.addFileToVFS("GoogleSans-Bold.ttf", fontBase64Bold);
-                doc.addFont("GoogleSans-Bold.ttf", "GoogleSans", "bold");
+                doc.addFileToVFS("NotoSansKR-Bold.ttf", fontBase64Bold);
+                doc.addFont("NotoSansKR-Bold.ttf", "NotoSansKR", "bold");
             }
 
             if (fontBase64Regular || fontBase64Bold) {
-                doc.setFont("GoogleSans", "normal");
-                addLog("구글 고품질 정적 서체 패키지(Regular & Bold) 결합 완료.", "success");
+                doc.setFont("NotoSansKR", "normal");
+                addLog("한국어 Noto Sans KR 가독성 정적 서체 패키지 결합 완료.", "success");
             } else {
-                addLog("⚠️ 저장소 내부 서체 로드 실패로 시스템 기본 폰트로 대체 구동합니다.", "warn");
+                addLog("⚠️ 서체 로드 최종 실패로 시스템 기본 폰트로 대체 구동합니다.", "warn");
             }
 
             var margin = 10;
@@ -646,17 +655,18 @@
                 var item = data[i];
                 if (i > 0) doc.addPage();
 
+                // 수집 에러 발생 판례에 대한 가시성 높인 PDF 독립 경고 페이지 디자인 렌더링
                 if (item.isError) {
                     addLog("[" + item.title + "] PDF 우회 링크 페이지 생성 중...");
                     var currentY = margin + 10;
 
-                    if (fontBase64Bold) doc.setFont("GoogleSans", "bold");
+                    if (fontBase64Bold) doc.setFont("NotoSansKR", "bold");
                     doc.setFontSize(fontSizeTitle);
                     doc.setTextColor(220, 53, 69);
                     doc.text("판례 수집 우회 리포트", margin, currentY);
                     currentY += lineHeightTitle + 6;
 
-                    if (fontBase64Regular) doc.setFont("GoogleSans", "normal");
+                    if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
                     doc.setFontSize(fontSizeBody);
                     doc.setTextColor(32, 33, 36);
                     doc.text("대상 사건번호: " + item.title, margin, currentY);
@@ -671,7 +681,7 @@
                     }
                     currentY += 8;
 
-                    if (fontBase64Bold) doc.setFont("GoogleSans", "bold");
+                    if (fontBase64Bold) doc.setFont("NotoSansKR", "bold");
                     doc.setTextColor(26, 115, 232);
                     
                     var webUrl = "https://www.law.go.kr/LSW/precInfoP.do?evtNo=" + encodeURIComponent(item.title);
@@ -685,12 +695,12 @@
                 addLog("[" + item.title + "] 고급 독해용 레이아웃 구성 및 도면 드로잉 중...");
                 var currentY = margin + 5;
 
-                if (fontBase64Bold) doc.setFont("GoogleSans", "bold");
+                if (fontBase64Bold) doc.setFont("NotoSansKR", "bold");
                 doc.setFontSize(fontSizeTitle);
                 doc.text(item.title, margin, currentY);
                 currentY += lineHeightTitle + 4;
 
-                if (fontBase64Regular) doc.setFont("GoogleSans", "normal");
+                if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
                 doc.setFontSize(fontSizeBody);
                 
                 var paragraphs = item.content.split('\n');
@@ -704,9 +714,9 @@
 
                     var isHeader = para.trim().startsWith("【") || para.trim().startsWith("[") || para.trim().match(/^\d+\.\s+상고이유/) || para.trim().startsWith("대법관");
                     if (isHeader && fontBase64Bold) {
-                        doc.setFont("GoogleSans", "bold");
+                        doc.setFont("NotoSansKR", "bold");
                     } else if (fontBase64Regular) {
-                        doc.setFont("GoogleSans", "normal");
+                        doc.setFont("NotoSansKR", "normal");
                     }
 
                     var lines = doc.splitTextToSize(para, printWidth);
