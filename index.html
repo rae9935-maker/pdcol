@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>판례 검색기</title>
     
+    <!-- jsPDF 라이브러리 로드 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
@@ -322,32 +323,35 @@
         return "";
     }
 
-    // [수정 핵심 엔기어] 가독성을 높이기 위해 줄 바꿈 문자와 공백을 완전 재정렬하는 서식 엔진
+    // [정밀 개행 변환 엔진] 유저가 제시한 시각적 여백 규칙을 완벽하게 적용하는 서식 변환기
     function formatCaseContent(text) {
         if (!text) return "";
         
-        // 1. 다중 연속 공백을 단일 공백으로 치환하여 난잡한 띄어쓰기 제거
+        // 1. 중복된 공백 스트림 제거 및 단일화
         var formatted = text.replace(/[ \t]+/g, ' ');
         
-        // 2. 주요 표제어 태그 기호 앞에 강제로 줄 바꿈 주입
+        // 2. 표제어 정의 및 매칭 가공 (독립된 한 줄 공백 확보 레이어)
         var targetTags = [
             "【원고,상고인】", "【피고,피상고인】", "【원심판결】", "【주문】", "【이유】",
             "【판시사항】", "【판결요지】", "【참조조문】", "【참조판례】"
         ];
         
         targetTags.forEach(function(tag) {
+            // 표제어 선언 후 정확히 한 줄의 빈 줄(\n\n)을 두고 본문이 시작되도록 포맷 수정
             var regex = new RegExp(" *" + tag.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") + " *", "g");
-            formatted = formatted.replace(regex, "\n\n" + tag + "\n");
+            formatted = formatted.replace(regex, "\n\n" + tag + "\n\n");
         });
         
-        // 3. 주문 및 이유 내부의 재판관 명단 단락 강제 개행
-        formatted = formatted.replace(/대법관\s+/g, "\n대법관 ");
+        // 3. 이유 본문 속 항목 번호 및 선고 요약 단락 구획 분리
+        formatted = formatted.replace(/(\s*)(\d+\.\s+상고이유)/g, "\n\n$2");
+        formatted = formatted.replace(/(\s*)(상고이유를\s+본다\.)/g, "\n\n$2");
+        formatted = formatted.replace(/(\s*)(그러므로\s+상고를\s+기각하고)/g, "\n\n$2");
         
-        // 4. 이유 본문 속 상고이유 번호 구획화 처리 (예: "1. 상고이유", "2. 상고이유")
-        formatted = formatted.replace(/(\s+)(\d+\.\s+상고이유)/g, "\n\n$2");
-        formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관)/g, "$1\n$3");
+        // 4. 재판관 명단 단락 강제 개행 및 여백 부여
+        formatted = formatted.replace(/(\s*)(대법관\s+)/g, "\n\n대법관 ");
+        formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관)/g, "$1\n\n$3");
 
-        // 5. 불필요하게 많이 겹친 빈 줄을 깔끔하게 최대 2개로 통일
+        // 5. 비정상적으로 많이 중복 누적된 빈 줄을 청소하되, 본문 간 여백 보존을 위해 최대 2개(\n\n)로 표준화
         formatted = formatted.replace(/\n{3,}/g, "\n\n");
         
         return formatted.trim();
@@ -394,7 +398,7 @@
             throw new Error("판례 식별 정보를 파싱하지 못했습니다.");
         }
 
-        var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=prec&ID=" + precSeq + "&type=XML";
+        var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=steady&target=prec&ID=" + precSeq + "&type=XML";
         var detailResponse = await fetchWithFallback(detailUrl, caseNum);
         
         var detailBuffer = await detailResponse.arrayBuffer();
@@ -418,7 +422,6 @@
         var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
         var summary2 = cleanText(getXmlTagValue(detailText, "판결요지"));
         
-        // 전방위 역추적 레이어를 통한 본문 포착 가동
         var bodyTags = ["전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
         var textBody = "";
         for (var t = 0; t < bodyTags.length; t++) {
@@ -443,17 +446,16 @@
             }
         }
 
-        // 각 구역별 정밀 서식 빌딩 처리 수행
+        // 헤더 3줄 개행 배치 처리
         var finalCourtHeader = courtName + " " + sentenceDate + " 선고 \n" + caseNumber + " 판결 \n[" + caseName + "]\n";
         var finalSummary1 = summary1 ? "【판시사항】\n" + summary1 : "";
         var finalSummary2 = summary2 ? "【판결요지】\n" + summary2 : "";
         var finalBodyText = textBody ? textBody : "【이유】\n(※ 본 판례는 요약 정보만 제공되는 항목입니다.)";
 
-        // 전체 취합 문자열을 통합 포맷터에 전달하여 줄 바꿈 재정렬
         var compiledText = finalCourtHeader + "\n" + finalSummary1 + "\n" + finalSummary2 + "\n" + finalBodyText;
         var perfectFormattedText = formatCaseContent(compiledText);
 
-        addLog("[" + caseNum + "] 모든 본문 데이터 결합 및 가독성 개행 정렬 성공", "success");
+        addLog("[" + caseNum + "] 모든 본문 데이터 결합 및 명확한 개행 재정렬 성공", "success");
         return perfectFormattedText;
     }
 
@@ -588,7 +590,7 @@
                     }
 
                     // 가독성을 위해 표제어 괄호 구간 가중치 스캔 스타일링
-                    var isHeader = para.trim().startsWith("【") || para.trim().startsWith("[") || para.trim().match(/^\d+\.\s+상고이유/);
+                    var isHeader = para.trim().startsWith("【") || para.trim().startsWith("[") || para.trim().match(/^\d+\.\s+상고이유/) || para.trim().startsWith("대법관");
                     if (isHeader && fontBase64Bold) {
                         doc.setFont("GoogleSans", "bold");
                     } else if (fontBase64Regular) {
