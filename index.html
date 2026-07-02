@@ -330,7 +330,6 @@
         var caseRegex = /\d{2,4}\s*[가-힣]{1,3}\s*\d+/g;
         var matches = text.match(caseRegex) || [];
         
-        // [버그 수정]: 법원 공식 서식을 왜곡하지 않도록 공백만 지우고 원본 규격을 철저히 보존
         var cleanedMatches = matches.map(function(item) {
             return item.replace(/\s+/g, ""); 
         });
@@ -434,21 +433,23 @@
         return matchesNorm ? matchesNorm[0] : normalized.replace(/[^가-힣0-9]/g, "");
     }
 
+    // [레이아웃 컴파일러 대개조 엔진]
     function formatSection(text, sectionType, isDetc) {
         if (!text) return "";
         
         var formatted = text.replace(/[ \t]+/g, ' ');
         
+        // 날짜 마침표 보호 조치 (〔DOT〕 기호 임시 이탈 바인딩)
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\b/g, "$1〔DOT〕$2");
         
-        formatted = formatted.replace(/([^\n])\s*(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)/g, "$1\n\n$2");
-        formatted = formatted.replace(/(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)\s*([^\n])/g, "$1\n\n$2");
+        // [버그 4 완치] 【】 대괄호 타이틀 배치 시 윗줄과 아랫줄 모두에 완벽하게 개행(\n\n) 인젝션 보장
+        formatted = formatted.replace(/\s*(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)\s*/g, "\n\n$1\n\n");
 
-        formatted = formatted.replace(/([.\)\]])\s*([가-하]\.)/g, "$1\n\n$2");
-        formatted = formatted.replace(/([가-하]\.)\s*([^\n\s])/g, "$1\n\n$2");
+        // [버그 2 완치] '것.' 오인 매칭을 지우기 위해 광범위 유니코드 [가-하]를 폐기하고 한글 정식 목차 기호만 명시적 한정 차단
+        formatted = formatted.replace(/([.\)\]])\s*([가나다라마바사아자차카타파하]\.)/g, "$1\n\n$2");
 
         if (sectionType === 'summary') {
             if (isDetc) {
@@ -458,17 +459,27 @@
             }
         } else if (sectionType === 'body') {
             formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
-            formatted = formatted.replace(/(^|\s)(\d+\.\s+상고이유|\d+\.\s+먼저|\d+\.\s+)/g, "$1\n\n$2");
-            formatted = formatted.replace(/(^|\s)([가-하]\.\s+)/g, "$1\n\n$2");
+            
+            // [버그 3 완치] 인라인 내부 인덱싱 기호('1., 2.)가 문장 부호(따옴표) 결합 유무에 상관없이 1번부터 일괄 개행 처리되도록 정규식 수렴
+            formatted = formatted.replace(/(^|\s|['"‘“])(\d+\.\s+상고이유|\d+\.\s+먼저|\d+\.\s+)/g, "$1\n\n$2");
+            formatted = formatted.replace(/(^|\s|['"‘“])([가나다라마바사아자차카타파하]\.\s+)/g, "$1\n\n$2");
             formatted = formatted.replace(/(^|\s)(\((\d+)\)\s+)/g, "$1\n\n$2");
             formatted = formatted.replace(/(^|\s)(그러므로\s+상고를\s+기각하고)/g, "$1\n\n$2");
             
             formatted = formatted.replace(/([^\n])\s*(\[대법관[^\]]+의견\])/g, "$1\n\n$2\n\n");
             formatted = formatted.replace(/(\.|\?|!)\s*((대법관|대법원장|헌법재판소장|재판관)\s+[가-힣])/g, "$1\n\n$2");
             formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관|대법원장|헌법재판소장|재판관)/g, "$1\n\n$3");
+
+            // [버그 1 완치] 주요 법원 대목차 타이틀 기호 뒤의 텍스트가 줄바꿈 분실로 우회 접착되지 않도록 마감 개행 삽입
+            formatted = formatted.replace(/(\d+\.\s+원심판결의\s+요지|\d+\.\s+대법원의\s+판단|\d+\.\s+결론)/g, "$1\n");
+            formatted = formatted.replace(/([가나다라마바사아자차카타파하]\.\s+상고이유\s+제?\s*\d+\s*점에\s+대하여)/g, "$1\n");
         }
 
-        formatted = formatted.replace(/([.?!])[ \t]+([^\n])/g, "$1\n$2");
+        // [버그 1, 2 완치] 
+        // 1) 단독 구조 기호(숫자 또는 자음 목차)의 마침표 직후에는 일반 문장 종결 스플릿이 작동하지 않도록 부정형 전방탐색(Lookbehind) 격리 제어 적용
+        // 2) '것.' 등이 본문 목차 분쇄기로 오작동하던 잔여 부작용 차단
+        formatted = formatted.replace(/(?<!\b\d{1,4})(?<!\b[가나다라마바사아자차카타파하])([.?!])[ \t]+([^\n])/g, "$1\n$2");
+
         formatted = formatted.replace(/〔DOT〕/g, ".");
         formatted = formatted.replace(/\n{3,}/g, "\n\n");
         
