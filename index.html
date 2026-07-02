@@ -232,7 +232,7 @@
 
 <div id="toast"></div>
 
-<script {is_runnable: true}>
+<script>
     window.onerror = function(msg, url, lineNo) {
         addLog("시스템 예외 감지: " + msg + " (Line: " + lineNo + ")", "error");
         return false;
@@ -373,6 +373,7 @@
         
         var formatted = text.replace(/[ \t]+/g, ' ');
         
+        // 연월일 및 월일 마침표까지 완벽 보호 처리
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
@@ -407,23 +408,31 @@
         return cleaned.trim();
     };
 
+    // [★ 초정형 하이브리드 수집 파이프라인]: 대법원 판례와 헌법재판소 결정례 자동 분기 처리
     async function fetchCaseTextReal(caseNum) {
         var OC = document.getElementById('ocInput').value.trim();
         if (!OC) throw new Error("우측 상단의 '인증키(oc)' 가 비어 있습니다.");
 
-        var searchUrl = "https://www.law.go.kr/DRF/lawSearch.do?OC=" + OC + "&target=prec&type=XML&query=" + encodeURIComponent(caseNum);
+        var isDetc = caseNum.includes("헌");
+        var targetType = isDetc ? "detc" : "prec";
+        
+        var searchUrl = "https://www.law.go.kr/DRF/lawSearch.do?OC=" + OC + "&target=" + targetType + "&type=XML&query=" + encodeURIComponent(caseNum);
+        if (isDetc) {
+            searchUrl += "&mobileYn=Y";
+        }
         var searchResponse = await fetchWithFallback(searchUrl, caseNum);
         
         var arrayBuffer = await searchResponse.arrayBuffer();
         var utf8Decoder = new TextDecoder('utf-8');
         var searchText = utf8Decoder.decode(arrayBuffer);
         
-        if (!searchText.includes("PrecSearch") && !searchText.includes("precSearch")) {
+        if (!searchText.includes("PrecSearch") && !searchText.includes("precSearch") && !searchText.includes("DetcSearch") && !searchText.includes("detcSearch")) {
             var eucKrDecoder = new TextDecoder('euc-kr');
             searchText = eucKrDecoder.decode(arrayBuffer);
         }
         
-        var precBlocks = searchText.match(/<prec[^>]*>([\s\S]*?)<\/prec>/gi) || [];
+        var blockTag = isDetc ? "detc" : "prec";
+        var precBlocks = searchText.match(new RegExp("<" + blockTag + "[^>]*>([\\s\\S]*?)<\/" + blockTag + ">", "gi")) || [];
         var precSeq = "";
         var cleanTargetCase = getCoreCaseNumber(caseNum);
         var foundList = [];
@@ -434,7 +443,12 @@
             var block = precBlocks[i];
             var blockCaseNumRaw = getXmlTagValue(block, "사건번호") || getXmlTagValue(block, "caseNumber") || "";
             var blockCaseNum = getCoreCaseNumber(blockCaseNumRaw);
-            var blockSeq = getXmlTagValue(block, "precSeq") || getXmlTagValue(block, "판례일련번호") || "";
+            var blockSeq = "";
+            if (isDetc) {
+                blockSeq = getXmlTagValue(block, "헌재결정례일련번호") || getXmlTagValue(block, "detcSeq") || getXmlTagValue(block, "detcId") || "";
+            } else {
+                blockSeq = getXmlTagValue(block, "precSeq") || getXmlTagValue(block, "판례일련번호") || "";
+            }
             
             if (blockCaseNumRaw) {
                 foundList.push(blockCaseNumRaw);
@@ -443,47 +457,54 @@
             if (blockCaseNum === cleanTargetCase) {
                 precSeq = blockSeq;
                 if (precSeq) {
-                    addLog("[" + caseNum + "] 100% 동일한 대법원 판례 식별 일치 성공 (ID: " + precSeq + ")", "success");
+                    var typeLabel = isDetc ? "헌법재판소 결정례" : "대법원 판례";
+                    addLog("[" + caseNum + "] 100% 동일한 " + typeLabel + " 식별 일치 성공 (ID: " + precSeq + ")", "success");
                     break;
                 }
             }
         }
         
         if (!precSeq && precBlocks.length > 0) {
-            precSeq = getXmlTagValue(precBlocks[0], "precSeq") || getXmlTagValue(precBlocks[0], "판례일련번호");
+            var firstBlock = precBlocks[0];
+            if (isDetc) {
+                precSeq = getXmlTagValue(firstBlock, "헌재결정례일련번호") || getXmlTagValue(firstBlock, "detcSeq") || getXmlTagValue(firstBlock, "detcId") || "";
+            } else {
+                precSeq = getXmlTagValue(firstBlock, "precSeq") || getXmlTagValue(firstBlock, "판례일련번호") || "";
+            }
         }
         
         if (!precSeq) {
             var errMsg = getXmlTagValue(searchText, "errMsg");
             if (errMsg) throw new Error("법제처 API 오류 리포트: " + errMsg);
             
+            var targetLabel = isDetc ? "헌법재판소 결정례" : "대법원 판례";
             if (foundList.length > 0) {
-                throw new Error("입력한 사건번호 '" + caseNum + "'와 일치하는 공개 판례가 API 제공 대상에 없습니다. (API 검색 매칭 후보: " + foundList.join(", ") + ")");
+                throw new Error("입력한 사건번호 '" + caseNum + "'와 일치하는 공개 판례가 " + targetLabel + " API 제공 대상에 없습니다. (API 검색 매칭 후보: " + foundList.join(", ") + ")");
             } else {
                 throw new Error("입력한 사건번호 '" + caseNum + "'와 일치하는 판례를 Open API 에서 찾을 수 없습니다. (비공개 혹은 하급심 데이터셋 제한)");
             }
         }
 
-        var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=prec&ID=" + precSeq + "&type=XML";
+        var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=" + targetType + "&ID=" + precSeq + "&type=XML";
         var detailResponse = await fetchWithFallback(detailUrl, caseNum);
         
         var detailBuffer = await detailResponse.arrayBuffer();
         var detailText = utf8Decoder.decode(detailBuffer);
         
-        if (!detailText.includes("법원명") && !detailText.includes("사건번호")) {
+        if (!detailText.includes("법원명") && !detailText.includes("기관명") && !detailText.includes("사건번호")) {
             var eucKrDecoder = new TextDecoder('euc-kr');
             detailText = eucKrDecoder.decode(detailBuffer);
         }
 
-        var courtName = getXmlTagValue(detailText, "법원명");
-        var sentenceDate = getXmlTagValue(detailText, "선고일자");
+        var courtName = getXmlTagValue(detailText, "법원명") || getXmlTagValue(detailText, "기관명") || (isDetc ? "헌법재판소" : "");
+        var sentenceDate = getXmlTagValue(detailText, "선고일자") || getXmlTagValue(detailText, "결정일자") || getXmlTagValue(detailText, "선고일") || getXmlTagValue(detailText, "결정일");
         var caseNumber = getXmlTagValue(detailText, "사건번호");
         var caseName = getXmlTagValue(detailText, "사건명");
 
         var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
-        var summary2 = cleanText(getXmlTagValue(detailText, "판결요지"));
+        var summary2 = cleanText(getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지"));
         
-        var bodyTags = ["전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
+        var bodyTags = ["결정문", "전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
         var textBody = "";
         for (var t = 0; t < bodyTags.length; t++) {
             var extractedValue = cleanText(getXmlTagValue(detailText, bodyTags[t]));
@@ -507,10 +528,12 @@
             }
         }
 
-        var finalCourtHeader = courtName + " " + sentenceDate + " 선고 \n" + caseNumber + " 판결 \n[" + caseName + "]\n";
+        var verb = isDetc ? "결정" : "선고";
+        var documentType = isDetc ? "결정" : "판결";
+        var finalCourtHeader = courtName + " " + sentenceDate + " " + verb + " \n" + caseNumber + " " + documentType + " \n[" + caseName + "]\n";
         var finalSummary1 = summary1 ? "【판시사항】\n" + summary1 : "";
-        var finalSummary2 = summary2 ? "【판결요지】\n" + summary2 : "";
-        var finalBodyText = textBody ? textBody : "【이유】\n(※ 본 판례는 요약 정보만 제공되는 항목입니다.)";
+        var finalSummary2 = summary2 ? (isDetc ? "【결정요지】\n" : "【판결요지】\n") + summary2 : "";
+        var finalBodyText = textBody ? textBody : (isDetc ? "【결정문 및 이유】\n(※ 본 결정례는 요약 정보만 제공되는 항목입니다.)" : "【이유】\n(※ 본 판례는 요약 정보만 제공되는 항목입니다.)");
 
         var compiledText = finalCourtHeader + "\n" + finalSummary1 + "\n" + finalSummary2 + "\n" + finalBodyText;
         var perfectFormattedText = formatCaseContent(compiledText);
@@ -520,7 +543,6 @@
     }
 
     async function handleDownload(type) {
-        // [★ 디버깅 제어 흐름 복원]: API 통신 시작 전 무조건 로그를 클리어하고 출력함!
         clearLog();
         var inputData = document.getElementById('searchInput').value;
         addLog("입력 데이터 및 사건번호 패턴 정밀 분석 가동 중...");
@@ -561,8 +583,11 @@
         for (var i = 0; i < data.length; i++) {
             var item = data[i];
             if (item.isError) {
-                var webUrl = "https://www.law.go.kr/LSW/precInfoP.do?evtNo=" + encodeURIComponent(item.title);
-                output += "대법원/하급심 사건번호 " + item.title + " \n";
+                var isDetc = item.title.includes("헌");
+                var webUrl = isDetc 
+                    ? "https://www.law.go.kr/헌재결정례/" + encodeURIComponent(item.title)
+                    : "https://www.law.go.kr/LSW/precInfoP.do?evtNo=" + encodeURIComponent(item.title);
+                output += "사건번호 " + item.title + " \n";
                 output += "----------------------------------------\n";
                 output += "⚠️ 해당 판례는 법제처 Open API 연동 제한 대상(하급심 또는 비공개 판례)입니다.\n";
                 output += "국가법률정보센터 정식 웹 뷰어를 통해 아래 링크에서 편안하게 직접 읽으실 수 있습니다.\n\n";
@@ -583,7 +608,6 @@
         addLog("🎉 TXT 서식 파일 다운로드가 정상 완료되었습니다.", "success");
     }
 
-    // [★ 디버깅용 정밀 로거 탑재 서체 비동기 호출기]
     async function fetchFontAsBase64(url, fontName) {
         addLog(fontName + " 서체 로드 시도 중 (" + url + ")...");
         try {
@@ -609,7 +633,7 @@
     async function downloadPDF(data) {
         addLog("PDF 컴파일러 가동 및 한글 폰트 주입 분석 중...");
         try {
-            // [★ 핵심 교정]: 영문 전용 Google Sans 파일 호출을 폐기하고, 한국어 글자 좌표가 완벽하게 포함된 Noto Sans KR 정적 리소스로 100% 교체합니다!
+            // 로컬 Noto Sans KR 폰트 바인딩 완료
             var fontBase64Regular = await fetchFontAsBase64("./NotoSansKR-Regular.ttf", "NotoSansKR Regular (로컬)");
             var fontBase64Bold = await fetchFontAsBase64("./NotoSansKR-Bold.ttf", "NotoSansKR Bold (로컬)");
 
@@ -639,7 +663,7 @@
                 doc.setFont("NotoSansKR", "normal");
                 addLog("한국어 전용 Noto Sans KR 고가독성 서체 결합 완료.", "success");
             } else {
-                addLog("❌ 모든 서체 비동기 갱신 실패로 시스템 기본 Helvetica 폰트로 롤백합니다. (한글이 전면 누락되거나 외계어로 깨집니다)", "error");
+                addLog("⚠️ 서체 로드 최종 실패로 시스템 기본 폰트로 대체 구동합니다.", "warn");
             }
 
             var margin = 10;
@@ -687,7 +711,10 @@
                     if (fontBase64Bold) doc.setFont("NotoSansKR", "bold");
                     doc.setTextColor(26, 115, 232);
                     
-                    var webUrl = "https://www.law.go.kr/LSW/precInfoP.do?evtNo=" + encodeURIComponent(item.title);
+                    var isDetc = item.title.includes("헌");
+                    var webUrl = isDetc 
+                        ? "https://www.law.go.kr/헌재결정례/" + encodeURIComponent(item.title)
+                        : "https://www.law.go.kr/LSW/precInfoP.do?evtNo=" + encodeURIComponent(item.title);
                     doc.text("👉 [클릭] 국가법률정보센터에서 판결문 직접 보기", margin, currentY);
                     
                     doc.link(margin, currentY - 4, 120, 8, { url: webUrl });
@@ -698,6 +725,7 @@
                 addLog("[" + item.title + "] 고급 독해용 레이아웃 구성 및 도면 드로잉 중...");
                 var currentY = margin + 5;
 
+                // [★ 폰트 명칭 버그 교정 완료] - NotoSansKR 명칭으로 정교하게 매핑하여 한글 깨짐 원천 차단
                 if (fontBase64Bold) doc.setFont("NotoSansKR", "bold");
                 doc.setFontSize(fontSizeTitle);
                 doc.text(item.title, margin, currentY);
@@ -715,7 +743,7 @@
                         continue;
                     }
 
-                    var isHeader = para.trim().startsWith("【") || para.trim().startsWith("[") || para.trim().match(/^\d+\.\s+상고이유/) || para.trim().startsWith("대법관");
+                    var isHeader = para.trim().startsWith("【") || para.trim().startsWith("[") || para.trim().match(/^\d+\.\s+상고이유/) || para.trim().startsWith("대법관") || para.trim().startsWith("대법원장");
                     if (isHeader && fontBase64Bold) {
                         doc.setFont("NotoSansKR", "bold");
                     } else if (fontBase64Regular) {
