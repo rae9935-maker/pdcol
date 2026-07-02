@@ -114,7 +114,6 @@
             color: #202124;
         }
         
-        /* 파싱 데이터 가져오기 강조 버튼 스타일 */
         button.btn-raw {
             background-color: #e8f0fe;
             border-color: #d2e3fc;
@@ -502,7 +501,6 @@
         return cleaned.trim();
     };
 
-    // [핵심 변경 포지션]: 두 번째 매개변수 `isRaw` 를 추가하여, 요청에 따라 가공 없는 순수 텍스트 추출 기능 분기 구동
     async function fetchCaseTextReal(caseNum, isRaw) {
         var OC = sessionStorage.getItem('law_api_oc'); 
         if (!OC) throw { type: "KEY_ERROR", message: "우측 상단의 '인증키(oc)' 가 비어 있거나 세션이 만료되었습니다." };
@@ -598,6 +596,13 @@
             detailText = eucKrDecoder.decode(detailBuffer);
         }
 
+        // [핵심 변경 포지션]: 가공 및 트리밍, 헤더 추가 요청 배제 트랙
+        // 어떠한 가공이나 수정도 가하지 않고 법제처 서버가 응답한 raw XML 스트링을 100% 원형 보존하여 그대로 반환합니다.
+        if (isRaw) {
+            addLog("[" + caseNum + "] 가공 없는 순수 XML 데이터 반환", "success");
+            return detailText;
+        }
+
         var courtName = getXmlTagValue(detailText, "법원명") || getXmlTagValue(detailText, "기관명") || (isDetc ? "헌법재판소" : "");
         var sentenceDate = getXmlTagValue(detailText, "선고일자") || getXmlTagValue(detailText, "결정일자") || getXmlTagValue(detailText, "선고일") || getXmlTagValue(detailText, "결정일");
         var caseNumber = getXmlTagValue(detailText, "사건번호");
@@ -608,39 +613,6 @@
             sentenceDate = dStr.substring(0, 4) + ". " + parseInt(dStr.substring(4, 6), 10) + ". " + parseInt(dStr.substring(6, 8), 10) + ".";
         }
 
-        // [파싱 데이터 가져오기 전용 트랙]
-        // cleanText나 formatSection을 완전히 우회하여, HTML 태그만 소거하고 줄바꿈(\n)은 원본 100% 원형 보존
-        if (isRaw) {
-            var rawSummary1 = getXmlTagValue(detailText, "판시사항");
-            var rawSummary2 = getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지");
-            var bodyTags = ["결정문", "전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
-            var rawTextBody = "";
-            for (var t = 0; t < bodyTags.length; t++) {
-                var extractedValue = getXmlTagValue(detailText, bodyTags[t]);
-                if (extractedValue && extractedValue.length > rawTextBody.length) {
-                    rawTextBody = extractedValue;
-                }
-            }
-            
-            var stripHtmlOnly = function(str) {
-                if (!str) return "(데이터 없음)";
-                return str.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
-            };
-            
-            var rawOutput = "========================================\n";
-            rawOutput += "사건번호: " + caseNumber + " [가공 없는 오리지널 RAW 파싱 데이터]\n";
-            rawOutput += "법원명/일자: " + courtName + " " + sentenceDate + "\n";
-            rawOutput += "사건명: " + caseName + "\n";
-            rawOutput += "========================================\n\n";
-            rawOutput += "【1. 판시사항 RAW】\n" + stripHtmlOnly(rawSummary1) + "\n\n";
-            rawOutput += "【2. 판결요지/결정요지 RAW】\n" + stripHtmlOnly(rawSummary2) + "\n\n";
-            rawOutput += "【3. 본문 RAW】\n" + stripHtmlOnly(rawTextBody) + "\n";
-            
-            addLog("[" + caseNum + "] 오리지널 개행 RAW 데이터 파싱 성공", "success");
-            return rawOutput;
-        }
-
-        // 기존 정식 레이아웃 포맷팅 다운로드 트랙
         var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
         var summary2 = cleanText(getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지"));
         
@@ -710,7 +682,6 @@
         for (var i = 0; i < caseList.length; i++) {
             var caseNum = caseList[i];
             
-            // RAW 데이터 요청(type==='raw')인 경우에는 항상 캐시를 무시하고 새로 받아오도록 분기 처리
             if (type !== 'raw' && window.caseDataCache[caseNum] && !window.caseDataCache[caseNum].isError) {
                 addLog("[" + caseNum + "] 임시 메모리 캐시에 보관된 판결 데이터를 즉시 인젝션합니다.", "success");
                 collectedData.push(window.caseDataCache[caseNum]);
@@ -722,7 +693,6 @@
             }
             
             try {
-                // type 파라미터가 'raw'면 fetchCaseTextReal 함수 내부에서 참(true)으로 동작
                 var content = await fetchCaseTextReal(caseNum, (type === 'raw'));
                 var successItem = { title: caseNum, content: content, isError: false };
                 
@@ -748,23 +718,19 @@
     }
 
     function downloadTXT(data, isRaw) {
-        addLog(isRaw ? "오리지널 RAW 데이터 스트림 취합 중..." : "TXT 파일 조립 레이아웃 구성 중...");
+        addLog(isRaw ? "순수 원본 데이터 스트림 반환 및 조립 중..." : "TXT 파일 조립 레이아웃 구성 중...");
         var output = "";
         for (var i = 0; i < data.length; i++) {
             var item = data[i];
             if (item.isError) {
-                var isDetc = item.title.includes("헌");
-                var webUrl = isDetc 
-                    ? "https://www.law.go.kr/헌재결정례/" + encodeURIComponent(item.title)
-                    : "https://www.law.go.kr/LSW/precInfoP.do?evtNo=" + encodeURIComponent(item.title);
-                output += "사건번호: " + item.title + " \n";
-                output += "----------------------------------------\n";
-                output += "⚠️ 수집 오류: " + item.errorMessage + "\n";
-                output += "👉 해당 판결례 바로가기: " + webUrl + "\n";
+                output += "⚠️ 수집 오류 (" + item.title + "): " + item.errorMessage + "\n";
             } else {
                 output += item.content;
             }
-            if (i < data.length - 1) output += "\n\n\n========================================\n\n\n";
+            // 순수 원본 다운로드 시에는 임의의 가공 구분선 조차 배제하고 원본 데이터들 간에 줄바꿈만 적용합니다.
+            if (i < data.length - 1) {
+                output += isRaw ? "\n\n" : "\n\n\n========================================\n\n\n";
+            }
         }
 
         var blob = new Blob(["\uFEFF" + output], { type: "text/plain;charset=utf-8" });
@@ -772,11 +738,10 @@
         var a = document.createElement("a");
         a.href = url;
         
-        // 파일명도 확실하게 구별되도록 세팅
-        a.download = (isRaw ? "RAW_파싱데이터_" : "판례모음_") + new Date().toISOString().slice(0,10) + ".txt";
+        a.download = (isRaw ? "원본_" : "판례모음_") + new Date().toISOString().slice(0,10) + ".txt";
         a.click();
         URL.revokeObjectURL(url);
-        addLog("🎉 파일 다운로드가 완벽하게 정상 완료되었습니다.", "success");
+        addLog("🎉 파일 다운로드가 완료되었습니다.", "success");
     }
 
     async function fetchFontAsBase64(url, fontName) {
