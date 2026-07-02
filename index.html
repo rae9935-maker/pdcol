@@ -462,24 +462,21 @@
         
         return formatted.trim();
     }
-
-    var cleanText = function(str) {
+        
+    var cleanText = function(str, isDetc) {
         if (!str) return "";
         
-        // 1. <br/> 이나 <br> 태그를 명시적인 개행 문자(\n)로 가장 먼저 치환합니다.
-        var cleaned = str.replace(/<br\s*\/?>/gi, '\n');
+        // [조건부 치환]: 헌재 판례(isDetc)이면 \n, 대법원 판례(!isDetc)이면 \n\n으로 멀티플렉싱
+        var breakReplacement = isDetc ? '\n' : '\n\n';
+        var cleaned = str.replace(/<br\s*\/?>/gi, breakReplacement);
         
-        // 2. 나머지 시스템 XML/HTML 태그를 안전하게 제거하고 특수 공백(&nbsp;)을 스페이스로 바꿉니다.
+        // 나머지 태그 제거 및 공백 정돈 구조는 동일하게 유지
         cleaned = cleaned.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
-        
-        // 3. 다양한 운영체제의 줄바꿈 기호를 \n으로 통일합니다.
         cleaned = cleaned.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        
-        // 4. 문장 중간에 찌그러진 가로 공백(탭, 연속 스페이스)만 한 칸의 스페이스로 정리합니다.
         cleaned = cleaned.replace(/[ \t]+/g, ' ');
         
         return cleaned.trim();
-    };
+    }; 
 
     async function fetchCaseTextReal(caseNum, isRaw) {
         var OC = sessionStorage.getItem('law_api_oc'); 
@@ -562,29 +559,29 @@
                             "• 법원종류코드 : " + (courtCode || "정보 없음") + "\n" +
                             "--------------------------------------------------\n";
 
-        // 2. 내용 세부 항목 추출 (cleanText 함수를 거쳐 줄바꿈 보존형 정돈 진행)
-        var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
-        var summary2 = cleanText(getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지"));
-        var refLaw = cleanText(getXmlTagValue(detailText, "참조조문"));
-        var refPrecedent = cleanText(getXmlTagValue(detailText, "참조판례"));
+        // 2. 내용 세부 항목 추출 시 cleanText에 isDetc 인자를 함께 전달
+        var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"), isDetc);
+        var summary2 = cleanText(getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지"), isDetc);
+        var refLaw = cleanText(getXmlTagValue(detailText, "참조조문"), isDetc);
+        var refPrecedent = cleanText(getXmlTagValue(detailText, "참조판례"), isDetc);
         
-        // 3. 본문 텍스트 추출 (데이터 유실을 원천 차단하기 위해 매칭 가능한 모든 태그 순회)
+        // 3. 본문 텍스트 추출 루프 영역 수정
         var bodyTags = ["판례내용", "결정문", "전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
         var textBody = "";
         for (var t = 0; t < bodyTags.length; t++) {
-            var extractedValue = cleanText(getXmlTagValue(detailText, bodyTags[t]));
+            var extractedValue = cleanText(getXmlTagValue(detailText, bodyTags[t]), isDetc); // <- isDetc 추가
             if (extractedValue && extractedValue.length > textBody.length) {
                 textBody = extractedValue;
             }
         }
 
-        // CDATA 영역에 본문 구조가 통째로 박혀 있는 예외 케이스 백업 추출
+        // CDATA 영역 예외 백업 추출 영역 수정
         if (!textBody || textBody.length < 150) {
             var cdataRegex = /<!\[CDATA\[([\s\S]*?)\]\]>/gi;
             var cdataMatch;
             var longestCdata = "";
             while ((cdataMatch = cdataRegex.exec(detailText)) !== null) {
-                var cdataContent = cleanText(cdataMatch[1]);
+                var cdataContent = cleanText(cdataMatch[1], isDetc); // <- isDetc 추가
                 if (cdataContent.length > longestCdata.length) {
                     longestCdata = cdataContent;
                 }
@@ -593,7 +590,7 @@
                 textBody = longestCdata;
             }
         }
-
+        
         // 4. 각 텍스트 블록별 마크다운 스타일 레이아웃 구성
         var formattedSummary1 = summary1 ? "【판시사항】\n" + formatSection(summary1, 'summary', isDetc) : "";
         var formattedSummary2 = summary2 ? (isDetc ? "【결정요지】\n" + formatSection(summary2, 'summary', isDetc) : "【판결요지】\n" + formatSection(summary2, 'summary', isDetc)) : "";
