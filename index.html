@@ -445,61 +445,84 @@
         return matchesNorm ? matchesNorm[0] : normalized.replace(/[^가-힣0-9]/g, "");
     }
 
-    function formatSection(text, sectionType, isDetc) {
-        if (!text) return "";
+    // ==========================================
+    // [거시적 구조 분석 파싱 코어 모듈]
+    // ==========================================
+    
+    // 1단계: 라인 단위 성격 분석을 통한 거시 블록 구조화 (Block Tokenization)
+    function parseTextToStructures(text) {
+        if (!text) return [];
+        var lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+        var structures = [];
+        var currentParagraphLines = [];
         
-        var formatted = text.replace(/[ \t]+/g, ' ');
-        
-        formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
-        formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
-        formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
-        formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\b/g, "$1〔DOT〕$2");
-        
-        formatted = formatted.replace(/\s*(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)\s*/g, "\n\n$1\n\n");
-
-        formatted = formatted.replace(/([.\)\]])\s*([가나다라마바사아자차카타파하]\.)/g, "$1\n\n$2");
-
-        if (sectionType === 'summary') {
-            if (isDetc) {
-                formatted = formatted.replace(/(^|\s)(\d+\.\s+)/g, "$1\n\n$2");
-            } else {
-                formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
+        function flushParagraph() {
+            if (currentParagraphLines.length === 0) return;
+            var paraText = currentParagraphLines.join(' ').replace(/\s+/g, ' ').trim();
+            if (paraText) {
+                structures.push({ type: 'paragraph', text: paraText });
             }
-        } else if (sectionType === 'body') {
-            formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
-            
-            formatted = formatted.replace(/(^|\s|['"‘“])(\d+\.\s+상고이유|\d+\.\s+먼저|\d+\.\s+)/g, "$1\n\n$2");
-            formatted = formatted.replace(/(^|\s|['"‘“])([가나다라마바사아자차카타파하]\.\s+)/g, "$1\n\n$2");
-            formatted = formatted.replace(/(^|\s)(\((\d+)\)\s+)/g, "$1\n\n$2");
-            formatted = formatted.replace(/(^|\s)(그러므로\s+상고를\s+기각하고)/g, "$1\n\n$2");
-            
-            formatted = formatted.replace(/([^\n])\s*(\[대법관[^\]]+의견\])/g, "$1\n\n$2\n\n");
-            formatted = formatted.replace(/(\.|\?|!)\s*((대법관|대법원장|헌법재판소장|재판관)\s+[가-힣])/g, "$1\n\n$2");
-            formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관|대법원장|헌법재판소장|재판관)/g, "$1\n\n$3");
-
-            formatted = formatted.replace(/(\d+\.\s+원심판결의\s+요지|\d+\.\s+대법원의\s+판단|\d+\.\s+결론)/g, "$1\n");
-            formatted = formatted.replace(/([가나다라마바사아자차카타파하]\.\s+상고이유\s+제?\s*\d+\s*점에\s+대하여)/g, "$1\n");
+            currentParagraphLines = [];
         }
-
-        formatted = formatted.replace(/(?<!\b\d{1,4})(?<!\b[가나다라마바사아자차카타파하])([.?!])[ \t]+([^\n])/g, "$1\n$2");
-
-        formatted = formatted.replace(/〔DOT〕/g, ".");
-        formatted = formatted.replace(/\n{3,}/g, "\n\n");
         
-        return formatted.trim();
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line) {
+                flushParagraph();
+                continue;
+            }
+            
+            // 법원 정식 상위 대목차 구조 판단 조건식 선언
+            var isHeading = /^【.*】$/.test(line) || 
+                            /^\[.*\]$/.test(line) || 
+                            /^\d+\.\s+/.test(line) || 
+                            /^[가-하]\.\s+/.test(line) ||
+                            /^[가-하]\.$/.test(line) || 
+                            /^\d+\.$/.test(line);
+                            
+            if (isHeading) {
+                flushParagraph();
+                structures.push({ type: 'heading', text: line });
+            } else {
+                currentParagraphLines.push(line);
+            }
+        }
+        flushParagraph();
+        return structures;
     }
 
-    var cleanText = function(str) {
-        if (!str) return "";
-        var cleaned = str.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
-        cleaned = cleaned.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        cleaned = cleaned.replace(/\n\s*\n/g, '〔P_BREAK〕');
-        cleaned = cleaned.replace(/([가-힣])\n(다|라|까)\b/g, "$1$2");
-        cleaned = cleaned.replace(/\n/g, ' ');
-        cleaned = cleaned.replace(/〔P_BREAK〕/g, '\n\n');
-        cleaned = cleaned.replace(/[ \t]+/g, ' ');
-        return cleaned.trim();
-    };
+    // 2단계: 보호된 블록 내부 정밀 문장 추출 모듈 (Safe Sentence Splitting)
+    function splitSentences(text) {
+        var t = text;
+        // 판례문 내부 날짜 정합성 보호 코어 기믹 실행
+        t = t.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔D〕$2〔D〕$3〔D〕");
+        t = t.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔D〕$2〔D〕");
+        t = t.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔D〕$2〔D〕");
+        
+        // 정식 한글/영문 문장 종결 마침표 지점 분할 인젝션
+        t = t.replace(/([.?!])\s+(?=[^가-힣a-zA-Z0-9]*[가-힣a-zA-Z0-9])/g, "$1〔S_BREAK〕");
+        t = t.replace(/〔D〕/g, ".");
+        
+        var sentences = t.split("〔S_BREAK〕");
+        return sentences.map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
+    }
+
+    // 3단계: 가공 서식 레이아웃 종합 조립 통제 엔진 (TXT 파일용)
+    function generateFormattedText(structures) {
+        var chunks = [];
+        for (var i = 0; i < structures.length; i++) {
+            var struct = structures[i];
+            if (struct.type === 'heading') {
+                chunks.push(struct.text);
+            } else if (struct.type === 'paragraph') {
+                var sentences = splitSentences(struct.text);
+                // 규칙 1: 문장이 끝나고 다음 문장으로 넘어갈 때 단일 엔터 개행
+                chunks.push(sentences.join('\n'));
+            }
+        }
+        // 규칙 4: 문단과 문단 사이에는 완벽한 빈 칸인 줄 한 행 보장
+        return chunks.join('\n\n');
+    }
 
     async function fetchCaseTextReal(caseNum, isRaw) {
         var OC = sessionStorage.getItem('law_api_oc'); 
@@ -583,24 +606,23 @@
             }
         }
 
+        if (isRaw) {
+            addLog("[" + caseNum + "] 가공 없는 순수 XML 데이터 반환", "success");
+            return searchText; // 파싱 데이터 가져오기 전용 트랙 우회
+        }
+
         await new Promise(function(resolve) { setTimeout(resolve, 350); });
 
         var detailUrl = "https://www.law.go.kr/DRF/lawService.do?OC=" + OC + "&target=" + targetType + "&ID=" + precSeq + "&type=XML";
         var detailResponse = await fetchWithFallback(detailUrl, caseNum);
         
-        var detailBuffer = await detailResponse.arrayBuffer();
-        var detailText = utf8Decoder.decode(detailBuffer);
-        
+        var detailText = utf8Decoder.decode(await detailResponse.arrayBuffer());
         if (!detailText.includes("법원명") && !detailText.includes("기관명") && !detailText.includes("사건번호")) {
-            var eucKrDecoder = new TextDecoder('euc-kr');
-            detailText = eucKrDecoder.decode(detailBuffer);
+            detailText = new TextDecoder('euc-kr').decode(await detailResponse.arrayBuffer());
         }
 
-        // [핵심 변경 포지션]: 가공 및 트리밍, 헤더 추가 요청 배제 트랙
-        // 어떠한 가공이나 수정도 가하지 않고 법제처 서버가 응답한 raw XML 스트링을 100% 원형 보존하여 그대로 반환합니다.
         if (isRaw) {
-            addLog("[" + caseNum + "] 가공 없는 순수 XML 데이터 반환", "success");
-            return detailText;
+            return detailText; 
         }
 
         var courtName = getXmlTagValue(detailText, "법원명") || getXmlTagValue(detailText, "기관명") || (isDetc ? "헌법재판소" : "");
@@ -613,51 +635,39 @@
             sentenceDate = dStr.substring(0, 4) + ". " + parseInt(dStr.substring(4, 6), 10) + ". " + parseInt(dStr.substring(6, 8), 10) + ".";
         }
 
-        var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
-        var summary2 = cleanText(getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지"));
+        var stripHtmlOnly = function(str) {
+            if (!str) return "";
+            return str.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
+        };
+
+        var rawSummary1 = stripHtmlOnly(getXmlTagValue(detailText, "판시사항"));
+        var rawSummary2 = stripHtmlOnly(getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지"));
         
         var bodyTags = ["결정문", "전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
-        var textBody = "";
+        var rawTextBody = "";
         for (var t = 0; t < bodyTags.length; t++) {
-            var extractedValue = cleanText(getXmlTagValue(detailText, bodyTags[t]));
-            if (extractedValue && extractedValue.length > textBody.length) {
-                textBody = extractedValue;
-            }
-        }
-
-        if (!textBody || textBody.length < 150) {
-            var cdataRegex = /<!\[CDATA\[([\s\S]*?)\]\]>/gi;
-            var cdataMatch;
-            var longestCdata = "";
-            while ((cdataMatch = cdataRegex.exec(detailText)) !== null) {
-                var cdataContent = cleanText(cdataMatch[1]);
-                if (cdataContent !== summary1 && cdataContent !== summary2 && cdataContent.length > longestCdata.length) {
-                    longestCdata = cdataContent;
-                }
-            }
-            if (longestCdata.length > textBody.length) {
-                textBody = longestCdata;
+            var extractedValue = stripHtmlOnly(getXmlTagValue(detailText, bodyTags[t]));
+            if (extractedValue && extractedValue.length > rawTextBody.length) {
+                rawTextBody = extractedValue;
             }
         }
 
         var verb = isDetc ? "결정" : "선고";
         var documentType = isDetc ? "결정" : "판결";
         
+        // 콤팩트 구조적 텍스트 재컴파일 파트 가동
         var finalCourtHeader = courtName + " " + sentenceDate + " " + verb + " \n" + caseNumber + " " + documentType + " \n[" + caseName + "]\n";
-        var formattedSummary1 = summary1 ? "【판시사항】\n" + formatSection(summary1, 'summary', isDetc) : "";
-        var formattedSummary2 = summary2 ? (isDetc ? "【결정요지】\n" + formatSection(summary2, 'summary', isDetc) : "【판결요지】\n" + formatSection(summary2, 'summary', isDetc)) : "";
+        var formattedSummary1 = rawSummary1 ? "【판시사항】\n" + generateFormattedText(parseTextToStructures(rawSummary1)) : "";
+        var formattedSummary2 = rawSummary2 ? (isDetc ? "【결정요지】\n" + generateFormattedText(parseTextToStructures(rawSummary2)) : "【판결요지】\n" + generateFormattedText(parseTextToStructures(rawSummary2))) : "";
+        var formattedBodyText = rawTextBody ? generateFormattedText(parseTextToStructures(rawTextBody)) : "";
         
-        var formattedBodyText = textBody ? formatSection(textBody, 'body', isDetc) : "";
         if (formattedBodyText && !formattedBodyText.includes("【이유】") && !formattedBodyText.includes("【결정문】") && !formattedBodyText.includes("【전문】")) {
             formattedBodyText = (isDetc ? "【결정문 및 이유】\n" : "【이유】\n") + formattedBodyText;
-        } else if (!formattedBodyText) {
-            formattedBodyText = isDetc ? "【결정문 및 이유】\n(※ 본 결정례는 요약 정보만 제공되는 항목입니다.)" : "【이유】\n(※ 본 판례는 요약 정보만 제공되는 항목입니다.)";
         }
 
         var perfectFormattedText = finalCourtHeader + "\n" + formattedSummary1 + "\n" + formattedSummary2 + "\n" + formattedBodyText;
-
-        addLog("[" + caseNum + "] 모든 본문 데이터 결합 및 최적화 개행 완료", "success");
-        return perfectFormattedText;
+        addLog("[" + caseNum + "] 모든 본문 데이터 구조화 결합 완료", "success");
+        return perfectFormattedText.trim();
     }
 
     async function handleDownload(type) {
@@ -727,7 +737,6 @@
             } else {
                 output += item.content;
             }
-            // 순수 원본 다운로드 시에는 임의의 가공 구분선 조차 배제하고 원본 데이터들 간에 줄바꿈만 적용합니다.
             if (i < data.length - 1) {
                 output += isRaw ? "\n\n" : "\n\n\n========================================\n\n\n";
             }
@@ -737,7 +746,6 @@
         var url = URL.createObjectURL(blob);
         var a = document.createElement("a");
         a.href = url;
-        
         a.download = (isRaw ? "원본_" : "판례모음_") + new Date().toISOString().slice(0,10) + ".txt";
         a.click();
         URL.revokeObjectURL(url);
@@ -760,6 +768,9 @@
         }
     }
 
+    // ==========================================
+    // [구조 통제형 PDF 렌더링 엔진]
+    // ==========================================
     async function downloadPDF(data) {
         addLog("PDF 컴파일러 가동 및 한글 폰트 주입 분석 중...");
         try {
@@ -767,161 +778,109 @@
             var fontBase64Bold = await fetchFontAsBase64("./NotoSansKR-Bold.ttf", "NotoSansKR Bold");
 
             if (!fontBase64Regular) {
-                addLog("⚠️ 로컬 NotoSansKR-Regular.ttf 로드 우회 처리. 예비 초고속 CDN 복원망을 구동합니다.", "warn");
                 fontBase64Regular = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Regular.ttf", "NotoSansKR Regular (예비)");
             }
             if (!fontBase64Bold) {
-                addLog("⚠️ 로컬 NotoSansKR-Bold.ttf 로드 우회 처리. 예비 초고속 CDN 복원망을 구동합니다.", "warn");
                 fontBase64Bold = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Bold.ttf", "NotoSansKR Bold (CDN 예비)");
             }
 
             var jsPDF = window.jspdf.jsPDF;
             var doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-            if (fontBase64Regular) {
-                doc.addFileToVFS("NotoSansKR-Regular.ttf", fontBase64Regular);
-                doc.addFont("NotoSansKR-Regular.ttf", "NotoSansKR", "normal");
-            }
-            if (fontBase64Bold) {
-                doc.addFileToVFS("NotoSansKR-Bold.ttf", fontBase64Bold);
-                doc.addFont("NotoSansKR-Bold.ttf", "NotoSansKR-Bold", "normal");
-            }
+            if (fontBase64Regular) doc.addFileToVFS("NotoSansKR-Regular.ttf", fontBase64Regular), doc.addFont("NotoSansKR-Regular.ttf", "NotoSansKR", "normal");
+            if (fontBase64Bold) doc.addFileToVFS("NotoSansKR-Bold.ttf", fontBase64Bold), doc.addFont("NotoSansKR-Bold.ttf", "NotoSansKR-Bold", "normal");
 
-            if (fontBase64Regular || fontBase64Bold) {
-                doc.setFont("NotoSansKR", "normal");
-                addLog("한국어 전용 Noto Sans KR 고가독성 서체 결합 완료.", "success");
-            } else {
-                addLog("⚠️ 서체 로드 최종 실패로 시스템 기본 폰트로 대체 구동합니다.", "warn");
-            }
-
-            var margin = 10;
-            var pageWidth = 210;
-            var pageHeight = 297;
-            var printWidth = pageWidth - (margin * 2);
-            var bottomLimit = pageHeight - margin;
-
-            var fontSizeTitle = 15;
-            var fontSizeBody = 10; 
-            var lineHeightDefault = fontSizeBody * 0.3528 * 1.5; 
+            var margin = 10, pageWidth = 210, pageHeight = 297, printWidth = pageWidth - (margin * 2), bottomLimit = pageHeight - margin;
+            var fontSizeTitle = 15, fontSizeBody = 10, lineHeightDefault = fontSizeBody * 0.3528 * 1.5; 
 
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
                 if (i > 0) doc.addPage();
 
-                if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
-                doc.setTextColor(32, 33, 36);
-
                 if (item.isError) {
                     addLog("[" + item.title + "] PDF 우회 링크 페이지 생성 중...");
                     var currentY = margin + 10;
-
                     if (fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
-                    doc.setFontSize(fontSizeTitle);
-                    doc.setTextColor(220, 53, 69);
+                    doc.setFontSize(fontSizeTitle); doc.setTextColor(220, 53, 69);
                     doc.text("판례 수집 실패 보고서", margin, currentY);
-                    currentY += (fontSizeTitle * 0.3528 * 1.5) + 6; 
+                    currentY += (fontSizeTitle * 0.3528 * 1.5) + 6;
 
                     if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
-                    doc.setFontSize(fontSizeBody);
-                    doc.setTextColor(32, 33, 36);
+                    doc.setFontSize(fontSizeBody); doc.setTextColor(32, 33, 36);
                     doc.text("대상 사건번호: " + item.title, margin, currentY);
                     currentY += lineHeightDefault + 8;
 
                     doc.setTextColor(108, 117, 125);
-                    var detailDesc = "";
-                    if (item.errorType === "API_RESTRICTED") {
-                        detailDesc = "해당 판결은 존재하나, 법제처 Open API의 무료 개방 권한 범위를 벗어난 '지방법원/고등법원 하급심' 또는 '공개 비대상 결정례'에 속해 있습니다.";
-                    } else if (item.errorType === "NOT_FOUND") {
-                        detailDesc = "해당 사건번호가 법제처 데이터베이스에 존재하지 않거나 오타가 있습니다. 사건번호의 한글 및 일련번호 자릿수를 다시 한 번 확인해 주세요.";
-                    } else if (item.errorType === "KEY_ERROR") {
-                        detailDesc = "입력해 두신 법제처 API 인증키(oc)가 만료되었거나 올바르지 않습니다. 국가법령정보센터에서 신규 공동활용 키를 신청하여 입력창 우측 상단에 등록해 주세요.";
-                    } else {
-                        detailDesc = "대량 수집 중 동시 트래픽 정체 또는 법제처 국가 서버의 대역폭 한계로 임시 타임아웃 오류가 발생했습니다.";
-                    }
-                    
-                    var descLines = doc.splitTextToSize(detailDesc + " 수집을 임시 우회하여 국가법률정보센터 정식 웹 뷰어에서 직접 읽으실 수 있는 안전 하이퍼링크를 아래에 인젝션해 드립니다.", printWidth);
+                    var detailDesc = "해당 판례 정보를 가져오지 못했습니다. 번호 및 키를 확인하세요.";
+                    var descLines = doc.splitTextToSize(detailDesc, printWidth);
                     for (var k = 0; k < descLines.length; k++) {
-                        doc.text(descLines[k], margin, currentY);
-                        currentY += lineHeightDefault;
+                        doc.text(descLines[k], margin, currentY); currentY += lineHeightDefault;
                     }
-                    currentY += 8;
-
-                    if (fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
-                    doc.setTextColor(26, 115, 232);
-                    
-                    var isDetc = item.title.includes("헌");
-                    var webUrl = isDetc 
-                        ? "https://www.law.go.kr/헌재결정례/" + encodeURIComponent(item.title)
-                        : "https://www.law.go.kr/LSW/precInfoP.do?evtNo=" + encodeURIComponent(item.title);
-                    doc.text("👉 [클릭] 국가법률정보센터에서 판결문 직접 보기", margin, currentY);
-                    
-                    doc.link(margin, currentY - 4, 120, 8, { url: webUrl });
-                    doc.setTextColor(32, 33, 36);
                     continue;
                 }
 
-                addLog("[" + item.title + "] 고급 독해용 레이아웃 구성 및 도면 드로잉 중...");
+                addLog("[" + item.title + "] 고급 독해용 구조적 레이아웃 드로잉 중...");
+                
+                // 생성된 포맷 결과물을 거시적 블록 구조로 역인식 복원 가동
+                var structures = parseTextToStructures(item.content);
                 var currentY = margin + 5;
-                var paragraphs = item.content.split('\n');
-                var nonSpaceParaCount = 0; 
 
-                for (var j = 0; j < paragraphs.length; j++) {
-                    var para = paragraphs[j];
-                    
-                    if (para.trim() === "") {
-                        currentY += lineHeightDefault; 
-                        continue;
-                    }
+                for (var s = 0; s < structures.length; s++) {
+                    var struct = structures[s];
+                    var trimmedText = struct.text.trim();
 
-                    nonSpaceParaCount++;
+                    if (struct.type === 'heading') {
+                        if (fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
+                        var fSize = trimmedText.startsWith('【') ? 12 : 11;
+                        doc.setFontSize(fSize);
+                        doc.setTextColor(26, 115, 232); // 타이틀 인덱스 블루 세팅
 
-                    var isBold = false;
-                    var currentFontSize = fontSizeBody; 
-                    var trimmed = para.trim();
-
-                    if (nonSpaceParaCount <= 3) {
-                        isBold = true; 
-                        currentFontSize = 12; 
-                    } else if ((trimmed.startsWith("【") && trimmed.endsWith("】")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
-                        isBold = true; 
-                        currentFontSize = 11; 
-                    } else if (trimmed.match(/^(대법관|대법원장|헌법재판소장|재판관)\s+[가-힣]/)) {
-                        isBold = true; 
-                        currentFontSize = 10; 
-                    } else if (trimmed.match(/^[가-하]\./)) {
-                        isBold = true; 
-                        currentFontSize = 10;
-                    } else {
-                        currentFontSize = 10; 
-                    }
-
-                    if (isBold && fontBase64Bold) {
-                        doc.setFont("NotoSansKR-Bold", "normal");
-                    } else if (fontBase64Regular) {
-                        doc.setFont("NotoSansKR", "normal");
-                    }
-                    doc.setFontSize(currentFontSize);
-
-                    var currentLineHeight = currentFontSize * 0.3528 * 1.5;
-
-                    var lines = doc.splitTextToSize(para, printWidth);
-                    for (var k = 0; k < lines.length; k++) {
-                        if (currentY > bottomLimit) {
-                            doc.addPage();
-                            if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
-                            if (isBold && fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
-                            doc.setFontSize(currentFontSize);
-                            currentY = margin + 10;
+                        var hLineHeight = fSize * 0.3528 * 1.5;
+                        var hLines = doc.splitTextToSize(trimmedText, printWidth);
+                        
+                        for (var k = 0; k < hLines.length; k++) {
+                            if (currentY > bottomLimit) {
+                                doc.addPage();
+                                if (fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
+                                doc.setFontSize(fSize); currentY = margin + 10;
+                            }
+                            doc.text(hLines[k], margin, currentY); currentY += hLineHeight;
                         }
-                        doc.text(lines[k], margin, currentY);
-                        currentY += currentLineHeight;
+                        currentY += 2; // 타이틀 하단 여백 보정
+
+                    } else if (struct.type === 'paragraph') {
+                        if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
+                        doc.setFontSize(fontSizeBody); doc.setTextColor(32, 33, 36);
+
+                        var sentences = splitSentences(trimmedText);
+                        var intraLineHeight = fontSizeBody * 0.3528 * 1.5; // 규칙 2: 한 문장 내부 자동 래핑 줄간격 1.5
+
+                        for (var st = 0; st < sentences.length; st++) {
+                            var sLines = doc.splitTextToSize(sentences[st], printWidth);
+                            
+                            for (var k = 0; k < sLines.length; k++) {
+                                if (currentY > bottomLimit) {
+                                    doc.addPage();
+                                    if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
+                                    doc.setFontSize(fontSizeBody); currentY = margin + 10;
+                                }
+                                doc.text(sLines[k], margin, currentY); currentY += intraLineHeight;
+                            }
+
+                            // 규칙 3: 문장과 문장 사이를 가르는 간격은 정밀 2.0 배정 (1.5 + 0.5 패딩 추가)
+                            if (st < sentences.length - 1) {
+                                currentY += (fontSizeBody * 0.3528 * 0.5);
+                            }
+                        }
+                        // 규칙 4: 문단 간 구분을 위한 완벽한 빈 행 마진 추가
+                        currentY += lineHeightDefault;
                     }
                 }
             }
 
-            addLog("바이너리 마감 스트림 스트리밍 배출 중...");
+            addLog("바이너리 스트림 파일 출력 배출 중...");
             doc.save("판례모음_" + new Date().toISOString().slice(0,10) + ".pdf");
-            showToast("가독성이 극대화된 PDF 판례집 다운로드가 완료되었습니다!");
+            showToast("구조적 가독성이 반영된 PDF 다운로드가 완료되었습니다!");
         } catch (error) {
             addLog("❌ PDF 최종 결합 치명적 실패: " + error.message, 'error');
         }
