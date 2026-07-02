@@ -232,7 +232,7 @@
 
 <div id="toast"></div>
 
-<script>
+<script {is_runnable: true}>
     window.onerror = function(msg, url, lineNo) {
         addLog("시스템 예외 감지: " + msg + " (Line: " + lineNo + ")", "error");
         return false;
@@ -313,16 +313,15 @@
         document.body.removeChild(textarea);
     }
 
-    // [★ 초정밀 다각도 사건번호 추출기]: 임의의 띄어쓰기가 몇 칸이 들어가 있든 간에 무조건 사건번호만 발라냄
+    // [★ 초정밀 다각도 사건번호 추출기]
     function extractCaseNumbers(text) {
         if (!text) return [];
         
-        // 연도(2~4자리) + 임의의 공백 + 사건종류(가-힣 1~3자) + 임의의 공백 + 사건번호(숫자) 패턴 매칭
         var caseRegex = /\d{2,4}\s*[가-힣]{1,3}\s*\d+/g;
         var matches = text.match(caseRegex) || [];
         
         var cleanedMatches = matches.map(function(item) {
-            return item.replace(/\s+/g, ""); // "2011 두 13286" -> "2011두13286" 으로 가공
+            return item.replace(/\s+/g, ""); 
         });
         
         return cleanedMatches.filter(function(item, pos) {
@@ -368,13 +367,12 @@
         return matchesNorm ? matchesNorm[0] : normalized.replace(/[^가-힣0-9]/g, "");
     }
 
-    // [정밀 개행 변환 엔진] 날짜 훼손 오류 및 2차 날짜 깨짐을 완벽히 차단한 렌더링 코어
+    // [정밀 개행 변환 엔진]
     function formatCaseContent(text) {
         if (!text) return "";
         
         var formatted = text.replace(/[ \t]+/g, ' ');
         
-        // 연월일 및 월일 마침표까지 완벽 보호 처리
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
@@ -521,16 +519,15 @@
         return perfectFormattedText;
     }
 
-    // [★ 무정지 배치 실행 엔진 및 에러 캡처 피드백]
     async function handleDownload(type) {
-        // [★ 디버깅 복원]: 통신 전에 무조건 먼저 로그 박스를 클리어하고 화면에 띄웁니다!
+        // [★ 디버깅 제어 흐름 복원]: API 통신 시작 전 무조건 로그를 클리어하고 출력함!
         clearLog();
         var inputData = document.getElementById('searchInput').value;
-        addLog("입력 데이터 패턴 정밀 분석 가동 중...");
+        addLog("입력 데이터 및 사건번호 패턴 정밀 분석 가동 중...");
         
         var caseList = extractCaseNumbers(inputData);
         if (caseList.length === 0) {
-            addLog("⚠️ 사건번호 규격이 감지되지 않았습니다. 띄어쓰기가 있더라도 올바른 양식으로 작성해 주세요 (예: 2011 두 13286).", "error");
+            addLog("⚠️ 사건번호 규격이 감지되지 않았습니다. 올바른 양식으로 작성해 주세요 (예: 2011 두 13286).", "error");
             showToast("사건번호 규격이 감지되지 않았습니다.");
             return;
         }
@@ -586,10 +583,15 @@
         addLog("🎉 TXT 서식 파일 다운로드가 정상 완료되었습니다.", "success");
     }
 
-    async function fetchFontAsBase64(url) {
+    // [★ 디버깅용 정밀 로거 탑재 서체 비동기 호출기]
+    async function fetchFontAsBase64(url, fontName) {
+        addLog(fontName + " 서체 로드 시도 중 (" + url + ")...");
         try {
             var response = await fetch(url);
-            if(!response.ok) return null;
+            if(!response.ok) {
+                addLog("⚠️ " + fontName + " 로드 실패: HTTP 상태 코드 " + response.status, "warn");
+                return null;
+            }
             var blob = await response.blob();
             return new Promise(function(resolve) {
                 var reader = new FileReader();
@@ -598,26 +600,27 @@
                 reader.readAsDataURL(blob);
             });
         } catch (e) {
+            addLog("⚠️ " + fontName + " 연결 장애: " + e.message, "warn");
             return null;
         }
     }
 
-    // [★ 고정 폰트 한글 매핑 복원 및 미니멀 Noto Sans KR CDN 결합]
+    // [★ 고정 폰트 한글 매핑 완벽 복원 및 미니멀 Noto Sans KR CDN 결합]
     async function downloadPDF(data) {
-        addLog("PDF 컴파일러 가동 및 한글 폰트 데이터 분석 중...");
+        addLog("PDF 컴파일러 가동 및 한글 폰트 주입 분석 중...");
         try {
-            // [★ 핵심 교정]: 영문 전용 Google Sans 대신 한글 자모가 완벽히 들어 있는 한국어 전용 Noto Sans KR 정적 폰트 탑재
-            var fontBase64Regular = await fetchFontAsBase64("./NotoSansKR-Regular.ttf");
-            var fontBase64Bold = await fetchFontAsBase64("./NotoSansKR-Bold.ttf");
+            // [★ 핵심 교정]: 영문 전용 Google Sans 파일 호출을 폐기하고, 한국어 글자 좌표가 완벽하게 포함된 Noto Sans KR 정적 리소스로 100% 교체합니다!
+            var fontBase64Regular = await fetchFontAsBase64("./NotoSansKR-Regular.ttf", "NotoSansKR Regular (로컬)");
+            var fontBase64Bold = await fetchFontAsBase64("./NotoSansKR-Bold.ttf", "NotoSansKR Bold (로컬)");
 
-            // 로컬에 파일이 아직 없는 경우 타임아웃을 방지하기 위해 300KB급 초경량 미니멀 Noto Sans KR 온라인 CDN으로 즉시 우회
+            // 예외 방어선: 로컬 파일의 CDN 캐시 전파 지연 등을 우려한 300KB급 고속 온라인 미니민 Noto Sans KR CDN 우회 백업 탑재
             if (!fontBase64Regular) {
-                addLog("⚠️ 로컬 NotoSansKR-Regular 서체 부재로 0.1초 고속 온라인 복원망을 가동합니다.", "warn");
-                fontBase64Regular = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Regular.ttf");
+                addLog("⚠️ 로컬 NotoSansKR-Regular.ttf 로드 우회 처리. 예비 초고속 CDN 복원망을 구동합니다.", "warn");
+                fontBase64Regular = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Regular.ttf", "NotoSansKR Regular (CDN 예비)");
             }
             if (!fontBase64Bold) {
-                addLog("⚠️ 로컬 NotoSansKR-Bold 서체 부재로 0.1초 고속 온라인 복원망을 가동합니다.", "warn");
-                fontBase64Bold = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Bold.ttf");
+                addLog("⚠️ 로컬 NotoSansKR-Bold.ttf 로드 우회 처리. 예비 초고속 CDN 복원망을 구동합니다.", "warn");
+                fontBase64Bold = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Bold.ttf", "NotoSansKR Bold (CDN 예비)");
             }
 
             var jsPDF = window.jspdf.jsPDF;
@@ -634,9 +637,9 @@
 
             if (fontBase64Regular || fontBase64Bold) {
                 doc.setFont("NotoSansKR", "normal");
-                addLog("한국어 Noto Sans KR 가독성 정적 서체 패키지 결합 완료.", "success");
+                addLog("한국어 전용 Noto Sans KR 고가독성 서체 결합 완료.", "success");
             } else {
-                addLog("⚠️ 서체 로드 최종 실패로 시스템 기본 폰트로 대체 구동합니다.", "warn");
+                addLog("❌ 모든 서체 비동기 갱신 실패로 시스템 기본 Helvetica 폰트로 롤백합니다. (한글이 전면 누락되거나 외계어로 깨집니다)", "error");
             }
 
             var margin = 10;
