@@ -528,20 +528,46 @@
             return detailText;
         }
 
-        var courtName = getXmlTagValue(detailText, "법원명") || getXmlTagValue(detailText, "기관명") || (isDetc ? "헌법재판소" : "");
-        var sentenceDate = getXmlTagValue(detailText, "선고일자") || getXmlTagValue(detailText, "결정일자") || getXmlTagValue(detailText, "선고일") || getXmlTagValue(detailText, "결정일");
-        var caseNumber = getXmlTagValue(detailText, "사건번호");
-        var caseName = getXmlTagValue(detailText, "사건명");
 
+        
+        // 1. 원본 XML 내부의 모든 메타데이터 태그 빠짐없이 추출
+        var caseSerial = getXmlTagValue(detailText, "판례정보일련번호") || getXmlTagValue(detailText, "헌재결정례일련번호");
+        var caseName = getXmlTagValue(detailText, "사건명");
+        var caseNumber = getXmlTagValue(detailText, "사건번호");
+        var sentenceDate = getXmlTagValue(detailText, "선고일자") || getXmlTagValue(detailText, "결정일자") || getXmlTagValue(detailText, "선고일") || getXmlTagValue(detailText, "결정일");
+        var sentenceType = getXmlTagValue(detailText, "선고") || getXmlTagValue(detailText, "결정");
+        var courtName = getXmlTagValue(detailText, "법원명") || getXmlTagValue(detailText, "기관명") || (isDetc ? "헌법재판소" : "");
+        var courtCode = getXmlTagValue(detailText, "법원종류코드");
+        var caseTypeName = getXmlTagValue(detailText, "사건종류명");
+        var caseTypeCode = getXmlTagValue(detailText, "사건종류코드");
+        var judgmentType = getXmlTagValue(detailText, "판결유형") || getXmlTagValue(detailText, "결정유형");
+
+        // 선고일자 가독성 포맷팅 (YYYY. MM. DD. 형식)
         if (sentenceDate && sentenceDate.replace(/[^0-9]/g, "").length === 8) {
             var dStr = sentenceDate.replace(/[^0-9]/g, "");
             sentenceDate = dStr.substring(0, 4) + ". " + parseInt(dStr.substring(4, 6), 10) + ". " + parseInt(dStr.substring(6, 8), 10) + ".";
         }
 
+        // [상단 레이아웃] 모든 메타데이터를 누락 없이 텍스트 화화여 배치
+        var perfectHeader = "【기본 정보】\n" +
+                            "• 법원/기관명 : " + (courtName || "정보 없음") + "\n" +
+                            "• 사건번호 : " + (caseNumber || "정보 없음") + "\n" +
+                            "• 사건명 : " + (caseName || "정보 없음") + "\n" +
+                            "• 선고/결정일자 : " + (sentenceDate || "정보 없음") + (sentenceType ? " (" + sentenceType + ")" : "") + "\n" +
+                            "• 판결/결정유형 : " + (judgmentType || "정보 없음") + "\n" +
+                            "• 사건종류 : " + (caseTypeName || "정보 없음") + (caseTypeCode ? " (코드: " + caseTypeCode + ")" : "") + "\n" +
+                            "• 관리 일련번호 : " + (caseSerial || "정보 없음") + "\n" +
+                            "• 법원종류코드 : " + (courtCode || "정보 없음") + "\n" +
+                            "--------------------------------------------------\n";
+
+        // 2. 내용 세부 항목 추출 (cleanText 함수를 거쳐 줄바꿈 보존형 정돈 진행)
         var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
         var summary2 = cleanText(getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지"));
+        var refLaw = cleanText(getXmlTagValue(detailText, "참조조문"));
+        var refPrecedent = cleanText(getXmlTagValue(detailText, "참조판례"));
         
-        var bodyTags = ["결정문", "전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
+        // 3. 본문 텍스트 추출 (데이터 유실을 원천 차단하기 위해 매칭 가능한 모든 태그 순회)
+        var bodyTags = ["판례내용", "결정문", "전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
         var textBody = "";
         for (var t = 0; t < bodyTags.length; t++) {
             var extractedValue = cleanText(getXmlTagValue(detailText, bodyTags[t]));
@@ -550,6 +576,7 @@
             }
         }
 
+        // CDATA 영역에 본문 구조가 통째로 박혀 있는 예외 케이스 백업 추출
         if (!textBody || textBody.length < 150) {
             var cdataRegex = /<!\[CDATA\[([\s\S]*?)\]\]>/gi;
             var cdataMatch;
@@ -565,26 +592,27 @@
             }
         }
 
-        var verb = isDetc ? "결정" : "선고";
-        var documentType = isDetc ? "결정" : "판결";
-        
-        var finalCourtHeader = courtName + " " + sentenceDate + " " + verb + " \n" + caseNumber + " " + documentType + " \n[" + caseName + "]\n";
+        // 4. 각 텍스트 블록별 마크다운 스타일 레이아웃 구성
         var formattedSummary1 = summary1 ? "【판시사항】\n" + formatSection(summary1, 'summary', isDetc) : "";
         var formattedSummary2 = summary2 ? (isDetc ? "【결정요지】\n" + formatSection(summary2, 'summary', isDetc) : "【판결요지】\n" + formatSection(summary2, 'summary', isDetc)) : "";
+        var formattedRefLaw = refLaw ? "【참조조문】\n" + formatSection(refLaw, 'summary', isDetc) : "";
+        var formattedRefPrecedent = refPrecedent ? "【참조판례】\n" + formatSection(refPrecedent, 'summary', isDetc) : "";
         
-        var formattedBodyText = textBody ? formatSection(textBody, 'body', isDetc) : "";
-        if (formattedBodyText && !formattedBodyText.includes("【이유】") && !formattedBodyText.includes("【결정문】") && !formattedBodyText.includes("【전문】")) {
-            formattedBodyText = (isDetc ? "【결정문 및 이유】\n" : "【이유】\n") + formattedBodyText;
-        } else if (!formattedBodyText) {
-            formattedBodyText = isDetc ? "【결정문 및 이유】\n(※ 본 결정례는 요약 정보만 제공되는 항목입니다.)" : "【이유】\n(※ 본 판례는 요약 정보만 제공되는 항목입니다.)";
-        }
+        var formattedBodyText = textBody ? "【본문 내용】\n" + formatSection(textBody, 'body', isDetc) : "【본문 내용】\n(※ 본 판례는 요약 정보만 제공되는 항목입니다.)";
 
-        var perfectFormattedText = finalCourtHeader + "\n" + formattedSummary1 + "\n" + formattedSummary2 + "\n" + formattedBodyText;
+        // 5. 추출된 모든 파트를 단 하나의 공백이나 누락 없이 완전 결합
+        var perfectFormattedText = perfectHeader + "\n" + 
+                                   formattedSummary1 + "\n" + 
+                                   formattedSummary2 + "\n" + 
+                                   formattedRefLaw + "\n" + 
+                                   formattedRefPrecedent + "\n" + 
+                                   formattedBodyText;
 
         addLog("[" + caseNum + "] 모든 본문 데이터 결합 및 최적화 개행 완료", "success");
         return perfectFormattedText.trim();
     }
 
+    
     async function handleDownload(type) {
         clearLog();
         var inputData = document.getElementById('searchInput').value;
