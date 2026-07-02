@@ -191,7 +191,7 @@
     </div>
 
     <div class="search-box-wrapper">
-        <input type="text" id="searchInput" class="search-box" placeholder="판례번호를 입력하세요 (여러 개 입력 시 공백으로 구분)" autocomplete="off">
+        <input type="text" id="searchInput" class="search-box" placeholder="여기에 아무 문장이나 판결문을 그대로 붙여넣으세요" autocomplete="off">
     </div>
     
     <div class="btn-container">
@@ -208,7 +208,7 @@
     </div>
 
     <div class="info-text">
-        ※ 대법원, 하급심, 헌법재판소 판례번호를 인식해 리스트화합니다.<br>
+        ※ 임의의 텍스트 속에서 법원 사건번호 양식을 자동으로 똑똑하게 인식하여 리스트화합니다.<br>
         오른쪽 상단에 발급받으신 인증키(oc)를 입력해 두시면 브라우저에 저장됩니다.
     </div>
 </div>
@@ -285,11 +285,22 @@
         document.body.removeChild(textarea);
     }
 
+    // [★ 지능형 자연어 추출 필터] 띄어쓰기 유무와 무관하게 텍스트 내 사건번호만 정밀 감지 및 정규화
     function extractCaseNumbers(text) {
-        var caseRegex = /\d{2,4}[가-힣]{1,3}\d+/g;
+        if (!text) return [];
+        
+        // 연도(2~4자리) + 공백유무 + 판례유형(1~3자리 한글) + 공백유무 + 번호(1자리 이상 숫자) 감지 정규식
+        var caseRegex = /\d{2,4}\s*[가-힣]{1,3}\s*\d+/g;
         var matches = text.match(caseRegex) || [];
-        return matches.filter(function(item, pos) {
-            return matches.indexOf(item) == pos;
+        
+        // 매칭된 판례번호 내부의 빈칸을 완전히 제거하여 검색용 단일 규격으로 통일
+        var cleanedMatches = matches.map(function(item) {
+            return item.replace(/\s+/g, "");
+        });
+        
+        // 중복 수집 배제 필터링
+        return cleanedMatches.filter(function(item, pos) {
+            return cleanedMatches.indexOf(item) === pos;
         });
     }
 
@@ -324,44 +335,24 @@
         return "";
     }
 
-    // [★ 글로벌 텍스트 정규화 파이프라인] 법제처 DB 고유의 임의 하드랩(\n)을 완벽히 병합하는 청소 엔진
-    var cleanText = function(str) {
+    // [사건번호 정제 모듈] 공백이나 여타 노이즈를 다 지우고 뼈대 사건번호만 비교할 수 있게 가공
+    function getCoreCaseNumber(str) {
         if (!str) return "";
-        
-        // HTML 태그 제거 및 공백 표준화
-        var cleaned = str.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
-        
-        // 캐리지 리턴(\r\n)을 단일 개행(\n)으로 표준화
-        cleaned = cleaned.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        
-        // 1. 진짜 문단 구분(더블 개행 이상)을 가상 마커로 봉인하여 안전하게 보호
-        cleaned = cleaned.replace(/\n\s*\n/g, '〔P_BREAK〕');
-        
-        // 2. 단어 중간에서 쪼개진 어미(다, 라, 까)가 공백 없이 병합되도록 1차 보정
-        cleaned = cleaned.replace(/([가-힣])\n(다|라|까)\b/g, "$1$2");
-        
-        // 3. 문장 도중 무작위로 삽입된 모든 단일 개행 문자(\n)를 공백 하나로 변경하여 문장 통합
-        cleaned = cleaned.replace(/\n/g, ' ');
-        
-        // 4. 안전 영역에 대기하던 진짜 문단 마커를 다시 더블 개행(\n\n)으로 완벽하게 복구
-        cleaned = cleaned.replace(/〔P_BREAK〕/g, '\n\n');
-        
-        // 5. 다중 스페이스 파편 정리
-        cleaned = cleaned.replace(/[ \t]+/g, ' ');
-        
-        return cleaned.trim();
-    };
+        var normalized = str.replace(/\s+/g, "");
+        var matchesNorm = normalized.match(/\d{2,4}[가-힣]{1,3}\d+/);
+        return matchesNorm ? matchesNorm[0] : normalized.replace(/[^가-힣0-9]/g, "");
+    }
 
-    // [정밀 개행 변환 엔진] 유저 예시를 분석하여 완벽한 줄바꿈 분리를 처리하는 코어 유닛
+    // [정밀 개행 변환 엔진] 날짜 훼손 오류를 완벽히 차단한 렌더링 코어
     function formatCaseContent(text) {
         if (!text) return "";
         
         // 1. 문서 전체의 다중 연속 공백 파편 제거 및 단일화
         var formatted = text.replace(/[ \t]+/g, ' ');
         
-        // [날짜 보호 레이어]: 날짜 마침표가 본문 목차 마침표 정렬과 겹쳐 쪼개지지 않도록 일시 치환
-        formatted = formatted.replace(/(\d{4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
-        formatted = formatted.replace(/(\d{4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
+        // [★ 날짜 보호 엔진 업그레이드]: 연도 유무와 무관하게 모든 형태의 월. 일. 및 연. 월. 일. 매칭 보호 가동
+        formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
+        formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         
         // 2. 모든 【 】 형태의 대형 표제어 감지 후 앞뒤로 완벽한 빈 줄 독립 개행 배치
         formatted = formatted.replace(/\s*(【\s*[^】]+\s*】)\s*/g, "\n\n$1\n\n");
@@ -377,9 +368,7 @@
         
         // 5. [대법관 ...의 보충의견] 및 판결문 하단 대법관 명단 구역화 여백 처리
         formatted = formatted.replace(/([^\n])\s*(\[대법관[^\]]+의견\])/g, "$1\n\n$2\n\n");
-        
-        // (★ 버그 수정: 마지막 문장과 성명이 달라붙는 현상을 방지하기 위해 문장 기호 직후 대법관 연판장이 올 때 강제 2중 개행)
-        formatted = formatted.replace(/(\.|\?|!)\s*((대법관|대법원장)\s+[가-힣])/g, "$1\n\n$2");
+        formatted = formatted.replace(/(^|\s)((대법관|대법원장)\s+[가-힣])/g, "$1\n\n$2");
         formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관|대법원장)/g, "$1\n\n$3");
 
         // 6. 보호 구역에 묶여 있던 날짜 데이터의 마침표를 정당하게 원상 복구 처리
@@ -390,6 +379,18 @@
         
         return formatted.trim();
     }
+
+    var cleanText = function(str) {
+        if (!str) return "";
+        var cleaned = str.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
+        cleaned = cleaned.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        cleaned = cleaned.replace(/\n\s*\n/g, '〔P_BREAK〕');
+        cleaned = cleaned.replace(/([가-힣])\n(다|라|까)\b/g, "$1$2");
+        cleaned = cleaned.replace(/\n/g, ' ');
+        cleaned = cleaned.replace(/〔P_BREAK〕/g, '\n\n');
+        cleaned = cleaned.replace(/[ \t]+/g, ' ');
+        return cleaned.trim();
+    };
 
     async function fetchCaseTextReal(caseNum) {
         var OC = document.getElementById('ocInput').value.trim();
@@ -409,26 +410,32 @@
         
         var precBlocks = searchText.match(/<prec[^>]*>([\s\S]*?)<\/prec>/gi) || [];
         var precSeq = "";
-        var cleanTargetCase = caseNum.replace(/\s+/g, "");
+        var cleanTargetCase = getCoreCaseNumber(caseNum);
         
-        addLog("[" + caseNum + "] 검색 목록 매칭 파싱 시작...");
+        addLog("[" + caseNum + "] 검색 결과 매칭 검증 가동...");
         
         for (var i = 0; i < precBlocks.length; i++) {
             var block = precBlocks[i];
-            var blockCaseNum = (getXmlTagValue(block, "사건번호") || getXmlTagValue(block, "caseNumber")).replace(/\s+/g, "");
+            var blockCaseNum = getCoreCaseNumber(getXmlTagValue(block, "사건번호") || getXmlTagValue(block, "caseNumber") || "");
+            
             if (blockCaseNum === cleanTargetCase) {
                 precSeq = getXmlTagValue(block, "precSeq") || getXmlTagValue(block, "판례일련번호");
-                if (precSeq) break;
+                if (precSeq) {
+                    addLog("[" + caseNum + "] 100% 동일한 대법원 판례 식별 일치 성공 (ID: " + precSeq + ")", "success");
+                    break;
+                }
             }
         }
         
+        // 정교 일치가 실패한 경우 첫 번째 노드 백업 연계
         if (!precSeq && precBlocks.length > 0) {
             precSeq = getXmlTagValue(precBlocks[0], "precSeq") || getXmlTagValue(precBlocks[0], "판례일련번호");
+            addLog("[" + caseNum + "] ⚠️ 정밀 매칭 불일치로 대체 우선 후보 코드를 채택합니다 (ID: " + precSeq + ")", "warn");
         }
         
         if (!precSeq) {
             var errMsg = getXmlTagValue(searchText, "errMsg");
-            if (errMsg) throw new Error("법제처 리포트오류: " + errMsg);
+            if (errMsg) throw new Error("법제처 API 오류 리포트: " + errMsg);
             throw new Error("판례 식별 정보를 파싱하지 못했습니다.");
         }
 
@@ -490,30 +497,33 @@
     async function handleDownload(type) {
         clearLog();
         var inputData = document.getElementById('searchInput').value;
-        addLog("입력 판례 데이터 분석 파싱 중...");
+        addLog("입력 판례 데이터 자연어 파싱 중...");
         
+        // [수정 포인트]: 문장 속 판례번호들을 자동으로 정교하게 분리 추출
         var caseList = extractCaseNumbers(inputData);
         if (caseList.length === 0) {
-            addLog("⚠️ 유효한 사건번호 조합이 감지되지 않았습니다.", "error");
+            addLog("⚠️ 유효한 사건번호 조합이 감지되지 않았습니다. 문장에 사건번호를 기입해 주세요.", "error");
             return;
         }
 
-        addLog("판례 수집 큐(Queue) 등록 [" + caseList.length + "개]: " + caseList.join(', '));
+        addLog("판례 수집 대기열 자동 등록 [" + caseList.length + "개]: " + caseList.join(', '));
 
         var collectedData = [];
         for (var i = 0; i < caseList.length; i++) {
             var caseNum = caseList[i];
             try {
                 var content = await fetchCaseTextReal(caseNum);
-                collectedData.push({ title: caseNum, content: content });
+                collectedData.push({ title: caseNum, content: content, isError: false });
             } catch (err) {
-                addLog("❌ [" + caseNum + "] 수집 실패 원인: " + err.message, "error");
+                addLog("❌ [" + caseNum + "] 수집 실패: " + err.message, "error");
+                // [★ 무정지 배치 처리]: 개별 판례 실패 시에도 대기열 유실 없이 에러 스펙을 주입하여 속행
+                collectedData.push({ 
+                    title: caseNum, 
+                    content: "해당 판례번호: " + caseNum + " - " + err.message, 
+                    isError: true, 
+                    errorMessage: err.message 
+                });
             }
-        }
-
-        if (collectedData.length === 0) {
-            addLog("가용한 문서 파일 풀이 비어있어 빌드를 중단합니다.", "error");
-            return;
         }
 
         if (type === 'txt') downloadTXT(collectedData);
@@ -524,7 +534,12 @@
         addLog("TXT 파일 조립 레이아웃 구성 중...");
         var output = "";
         for (var i = 0; i < data.length; i++) {
-            output += data[i].content;
+            if (data[i].isError) {
+                // 수집 실패한 판례의 전용 에러 아카이빙 블록 처리
+                output += "해당 판례번호 : [" + data[i].title + "] 수집 실패\n오류 내용 : " + data[i].errorMessage;
+            } else {
+                output += data[i].content;
+            }
             if (i < data.length - 1) output += "\n\n----------\n\n";
         }
 
@@ -594,8 +609,36 @@
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
                 if (i > 0) doc.addPage();
-                addLog("[" + item.title + "] 고급 독해용 레이아웃 구성 및 도면 드로잉 중...");
 
+                // [★ 에러 보고형 단독 페이지 주입]: 수집 실패 판례 발생 시 PDF 내 전용 에러 리포트 렌더링
+                if (item.isError) {
+                    addLog("[" + item.title + "] PDF 에러 페이지 레이아웃 배치 중...");
+                    var currentY = margin + 10;
+
+                    if (fontBase64Bold) doc.setFont("GoogleSans", "bold");
+                    doc.setFontSize(fontSizeTitle);
+                    doc.setTextColor(220, 53, 69); // 에러 레드 컬러
+                    doc.text("판례 수집 실패 보고서", margin, currentY);
+                    currentY += lineHeightTitle + 6;
+
+                    if (fontBase64Regular) doc.setFont("GoogleSans", "normal");
+                    doc.setFontSize(fontSizeBody);
+                    doc.setTextColor(32, 33, 36);
+                    doc.text("대상 사건번호: " + item.title, margin, currentY);
+                    currentY += lineHeightBody + 6;
+
+                    doc.setTextColor(108, 117, 125); // 메타 설명 회색 컬러
+                    var errLines = doc.splitTextToSize("오류 내용: " + item.errorMessage, printWidth);
+                    for (var k = 0; k < errLines.length; k++) {
+                        doc.text(errLines[k], margin, currentY);
+                        currentY += lineHeightBody;
+                    }
+                    
+                    doc.setTextColor(32, 33, 36); // 기본 컬러 리셋
+                    continue;
+                }
+
+                addLog("[" + item.title + "] 고급 독해용 레이아웃 구성 및 도면 드로잉 중...");
                 var currentY = margin + 5;
 
                 if (fontBase64Bold) doc.setFont("GoogleSans", "bold");
