@@ -791,29 +791,27 @@
                         currentY += lineHeightDefault; 
                         continue;
                     }
-
+    
                     nonSpaceParaCount++;
-
+    
                     var isBold = false;
                     var currentFontSize = fontSizeBody; 
                     var trimmed = para.trim();
-
+    
+                    // 1. 상단 타이틀 영역(첫 3줄)은 크기만 12로 지정하고 bold는 적용하지 않음
                     if (nonSpaceParaCount <= 3) {
-                        isBold = true; 
                         currentFontSize = 12; 
-                    } else if ((trimmed.startsWith("【") && trimmed.endsWith("】")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+                    } 
+                    // 2. 오직 【 】 기호가 명시적으로 포함된 핵심 목차 라인만 볼드 처리 및 크기 11 지정
+                    else if (trimmed.includes("【") && trimmed.includes("】")) {
                         isBold = true; 
                         currentFontSize = 11; 
-                    } else if (trimmed.match(/^(대법관|대법원장|헌법재판소장|재판관)\s+[가-힣]/)) {
-                        isBold = true; 
-                        currentFontSize = 10; 
-                    } else if (trimmed.match(/^[가-하]\./)) {
-                        isBold = true; 
-                        currentFontSize = 10;
-                    } else {
+                    } 
+                    // 3. 그 외의 모든 일반 본문, 가.나.다. 목차, 대법관 이름 등은 기본 크기 10 및 일반 폰트 적용
+                    else {
                         currentFontSize = 10; 
                     }
-
+    
                     if (isBold && fontBase64Bold) {
                         doc.setFont("NotoSansKR-Bold", "normal");
                     } else if (fontBase64Regular) {
