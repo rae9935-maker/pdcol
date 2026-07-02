@@ -245,7 +245,6 @@
         }, 3000);
     }
 
-    // [★ 초벌 연결 엔진] oc 키가 없는 초기 진입 상태에서도 에러 없이 안전하게 프록시 라인을 사전 가열
     function warmUpProxies() {
         var testTargets = [
             "https://corsproxy.io/?https%3A%2F%2Fwww.law.go.kr",
@@ -269,6 +268,7 @@
             }
             
             warmUpProxies();
+            window.caseDataCache = {};
         } catch (e) {}
     };
 
@@ -329,7 +329,6 @@
         document.body.removeChild(textarea);
     }
 
-    // [★ 초정밀 다각도 사건번호 추출기]
     function extractCaseNumbers(text) {
         if (!text) return [];
         
@@ -345,7 +344,7 @@
         });
     }
 
-    // [★ 글로벌 서킷 브레이커 & 프록시 헬스 매니저]
+    // [★ 서킷 브레이커 구조적 상태 결함 전면 완치 엔진]
     var proxyHealth = {
         "https://corsproxy.io/?": { fails: 0, lastFail: 0 },
         "https://api.codetabs.com/v1/proxy?url=": { fails: 0, lastFail: 0 },
@@ -362,19 +361,30 @@
         var now = Date.now();
         var activeProxies = proxies.filter(function(p) {
             var h = proxyHealth[p];
-            if (h.fails >= 2 && (now - h.lastFail) < 45000) {
+            if (h.fails >= 2) {
+                // [★ 핵심 교정]: 격리 쿨다운(45초)이 끝난 회선은 다시 정상 상태(fails = 0)로 완전히 세탁 후 부활
+                if (now - h.lastFail > 45000) {
+                    h.fails = 0;
+                    return true;
+                }
                 return false; 
             }
             return true;
         });
 
         if (activeProxies.length === 0) {
+            // [★ 핵심 교정]: 전체 전멸 시 메모리 교착 상태를 파괴하기 위해 모든 fails 스코어를 강제 제로베이스화
+            proxies.forEach(function(p) { proxyHealth[p].fails = 0; });
             activeProxies = proxies; 
         }
 
         activeProxies.sort(function() { return Math.random() - 0.5; });
 
         for (var i = 0; i < activeProxies.length; i++) {
+            if (i > 0) {
+                await new Promise(function(resolve) { setTimeout(resolve, 400); });
+            }
+
             var currentProxy = activeProxies[i];
             var proxyName = currentProxy.includes("corsproxy") ? "고속망" : currentProxy.includes("codetabs") ? "기본망" : "비상망";
             
@@ -386,9 +396,8 @@
                 var res = await fetch(finalUrl, { signal: controller.signal });
                 clearTimeout(id);
                 if (res.ok) {
-                    if (proxyHealth[currentProxy].fails > 0) {
-                        proxyHealth[currentProxy].fails--; 
-                    }
+                    // [★ 핵심 교정]: 통신 성공 시 잔여 누적 점수를 완전 차감(0) 처리하여 선제적 마비 현상을 방지
+                    proxyHealth[currentProxy].fails = 0; 
                     return res;
                 }
                 throw new Error("HTTP Status " + res.status);
@@ -417,7 +426,6 @@
         return matchesNorm ? matchesNorm[0] : normalized.replace(/[^가-힣0-9]/g, "");
     }
 
-    // [★ 시맨틱 세그먼트 트리 포맷터]
     function formatSection(text, sectionType, isDetc) {
         if (!text) return "";
         
@@ -631,17 +639,30 @@
 
         addLog("판례 수집 큐(Queue) 등록 [" + caseList.length + "개]: " + caseList.join(', '));
 
+        if (!window.caseDataCache) {
+            window.caseDataCache = {};
+        }
+
         var collectedData = [];
         for (var i = 0; i < caseList.length; i++) {
             var caseNum = caseList[i];
             
+            if (window.caseDataCache[caseNum] && !window.caseDataCache[caseNum].isError) {
+                addLog("[" + caseNum + "] 임시 메모리 캐시에 보관된 판결 데이터를 즉시 인젝션합니다.", "success");
+                collectedData.push(window.caseDataCache[caseNum]);
+                continue;
+            }
+
             if (i > 0) {
-                await new Promise(function(resolve) { setTimeout(resolve, 350); });
+                await new Promise(function(resolve) { setTimeout(resolve, 600); });
             }
             
             try {
                 var content = await fetchCaseTextReal(caseNum);
-                collectedData.push({ title: caseNum, content: content, isError: false });
+                var successItem = { title: caseNum, content: content, isError: false };
+                
+                window.caseDataCache[caseNum] = successItem;
+                collectedData.push(successItem);
             } catch (err) {
                 var errType = err.type || "NETWORK_ERROR";
                 var errMsg = err.message || "서버 통신 장애 또는 프록시 네트워크 타임아웃이 발생했습니다.";
@@ -714,7 +735,6 @@
         }
     }
 
-    // [★ 고품격 캔버스 렌더링 엔진] 사용자의 요구사항에 맞추어 모든 줄간격 승수를 2.0으로 상향 고정
     async function downloadPDF(data) {
         addLog("PDF 컴파일러 가동 및 한글 폰트 주입 분석 중...");
         try {
@@ -757,7 +777,7 @@
 
             var fontSizeTitle = 15;
             var fontSizeBody = 10; 
-            var lineHeightDefault = fontSizeBody * 0.3528 * 2.0; // [수정 포인트]: 일괄 줄간격 2.0 적용 (기본 본문행간)
+            var lineHeightDefault = fontSizeBody * 0.3528 * 2.0; 
 
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
@@ -774,7 +794,7 @@
                     doc.setFontSize(fontSizeTitle);
                     doc.setTextColor(220, 53, 69);
                     doc.text("판례 수집 실패 보고서", margin, currentY);
-                    currentY += (fontSizeTitle * 0.3528 * 2.0) + 6; // 에러문 헤더 간격도 2.0배 연동
+                    currentY += (fontSizeTitle * 0.3528 * 2.0) + 6; 
 
                     if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
                     doc.setFontSize(fontSizeBody);
@@ -853,7 +873,6 @@
                     }
                     doc.setFontSize(currentFontSize);
 
-                    // [★ 핵심 교정]: 위계와 글꼴 크기에 관계없이 수치를 일률적으로 2.0배 확장 적용
                     var currentLineHeight = currentFontSize * 0.3528 * 2.0;
 
                     var lines = doc.splitTextToSize(para, printWidth);
