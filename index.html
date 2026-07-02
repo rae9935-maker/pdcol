@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -6,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>판례 검색기</title>
     
-    <!-- jsPDF 라이브러리 로드 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
@@ -226,7 +224,7 @@
 
     <div class="info-text">
         ※ 임의의 텍스트 속에서 법원 사건번호 양식을 자동으로 똑똑하게 인식하여 리스트화합니다.<br>
-        오른쪽 상단에 발급받으신 인증키(oc)를 입력해 두시면 브라우저에 저장됩니다.
+        오른쪽 상단에 인증키(oc)를 입력해 두시면 현재 탭 세션 동안 임시 저장됩니다. (페이지를 완전히 닫으면 삭제)
     </div>
 </div>
 
@@ -247,20 +245,28 @@
         }, 3000);
     }
 
+    // [★ 보안 업데이트] 페이지 로드 시 구동 메커니즘 변경
     window.onload = function() {
         try {
-            var savedOC = localStorage.getItem('law_api_oc');
+            // 과거 로컬 스토리지에 정적 보관되어 있던 취약 데이터가 있다면 즉시 강제 파기
+            if (localStorage.getItem('law_api_oc')) {
+                localStorage.removeItem('law_api_oc');
+            }
+            
+            // 현재 활성화된 탭 세션 범위 내의 데이터망만 조회
+            var savedOC = sessionStorage.getItem('law_api_oc');
             if (savedOC) {
                 document.getElementById('ocInput').value = savedOC;
             }
         } catch (e) {}
     };
 
+    // [★ 보안 업데이트] 로컬 영구 저장을 차단하고 세션 가상 메모리에 바인딩
     function saveOCKey() {
         var ocValue = document.getElementById('ocInput').value.trim();
         try {
-            localStorage.setItem('law_api_oc', ocValue);
-            showToast("인증키가 브라우저에 저장되었습니다.");
+            sessionStorage.setItem('law_api_oc', ocValue);
+            showToast("인증키가 현재 세션에 임시 저장되었습니다. (창을 닫으면 자동 소멸)");
         } catch (e) {}
     }
 
@@ -344,7 +350,6 @@
         ];
         
         var now = Date.now();
-        // 최근 45초 이내에 연속 2회 이상 장애를 일으킨 프록시는 필터링하여 배제
         var activeProxies = proxies.filter(function(p) {
             var h = proxyHealth[p];
             if (h.fails >= 2 && (now - h.lastFail) < 45000) {
@@ -354,10 +359,9 @@
         });
 
         if (activeProxies.length === 0) {
-            activeProxies = proxies; // 전체 전멸 시 강제 안전망 복구
+            activeProxies = proxies; 
         }
 
-        // 라운드 로빈 효과를 위해 무작위 정렬
         activeProxies.sort(function() { return Math.random() - 0.5; });
 
         for (var i = 0; i < activeProxies.length; i++) {
@@ -367,13 +371,13 @@
             try {
                 var finalUrl = currentProxy + encodeURIComponent(targetUrl);
                 var controller = new AbortController();
-                var id = setTimeout(function() { controller.abort(); }, 4000); // 4초 타임아웃으로 빠른 페일오버 실행
+                var id = setTimeout(function() { controller.abort(); }, 4000); 
                 
                 var res = await fetch(finalUrl, { signal: controller.signal });
                 clearTimeout(id);
                 if (res.ok) {
                     if (proxyHealth[currentProxy].fails > 0) {
-                        proxyHealth[currentProxy].fails--; // 정상 통신 시 천천히 벌점 삭감
+                        proxyHealth[currentProxy].fails--; 
                     }
                     return res;
                 }
@@ -409,36 +413,32 @@
         
         var formatted = text.replace(/[ \t]+/g, ' ');
         
-        // 연월일 및 월일 마침표 안전하게 일시 보호
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\b/g, "$1〔DOT〕$2");
         
+        formatted = formatted.replace(/([^\n])\s*(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)/g, "$1\n\n$2");
+        formatted = formatted.replace(/(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)\s*([^\n])/g, "$1\n\n$2");
+
         if (sectionType === 'summary') {
-            // [★ 수정 포인트]: 판시사항 내부에서는 오직 대괄호 목차 [1], [2] 만 분리 개행하며,
-            // 인라인에 포함된 1. 2. 이나 가. 나. 는 줄바꿈을 절대 하지 않고 본문 줄글로 안전 유지합니다.
-            // 단, 헌법재판소 결정례(isDetc = true)의 경우 대괄호가 없고 숫자 1. 2. 3. 이 최상위 대목차이므로 이것만 선택적 개행 처리합니다.
             if (isDetc) {
                 formatted = formatted.replace(/(^|\s)(\d+\.\s+)/g, "$1\n\n$2");
             } else {
                 formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
             }
         } else if (sectionType === 'body') {
-            // [이유 / 전문] 실제 판결 서술부이므로 대목차, 소목차 번호를 명확하게 구조적으로 분리
             formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
             formatted = formatted.replace(/(^|\s)(\d+\.\s+상고이유|\d+\.\s+먼저|\d+\.\s+)/g, "$1\n\n$2");
             formatted = formatted.replace(/(^|\s)([가-하]\.\s+)/g, "$1\n\n$2");
             formatted = formatted.replace(/(^|\s)(\((\d+)\)\s+)/g, "$1\n\n$2");
             formatted = formatted.replace(/(^|\s)(그러므로\s+상고를\s+기각하고)/g, "$1\n\n$2");
             
-            // 의견 블록 및 서명부 개행 처리
             formatted = formatted.replace(/([^\n])\s*(\[대법관[^\]]+의견\])/g, "$1\n\n$2\n\n");
             formatted = formatted.replace(/(\.|\?|!)\s*((대법관|대법원장|헌법재판소장|재판관)\s+[가-힣])/g, "$1\n\n$2");
             formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관|대법원장|헌법재판소장|재판관)/g, "$1\n\n$3");
         }
 
-        // 보호 기호 원상 복구
         formatted = formatted.replace(/〔DOT〕/g, ".");
         formatted = formatted.replace(/\n{3,}/g, "\n\n");
         
@@ -459,8 +459,8 @@
 
     // [★ 트리 컴포넌트 단위 수집 및 개별 포맷 연계 엔진]
     async function fetchCaseTextReal(caseNum) {
-        var OC = document.getElementById('ocInput').value.trim();
-        if (!OC) throw { type: "KEY_ERROR", message: "우측 상단의 '인증키(oc)' 가 비어 있습니다." };
+        var OC = sessionStorage.getItem('law_api_oc'); // 세션 스토리지 참조로 변경
+        if (!OC) throw { type: "KEY_ERROR", message: "우측 상단의 '인증키(oc)' 가 비어 있거나 세션이 만료되었습니다." };
 
         var isDetc = caseNum.includes("헌");
         var targetType = isDetc ? "detc" : "prec";
@@ -557,7 +557,11 @@
         var caseNumber = getXmlTagValue(detailText, "사건번호");
         var caseName = getXmlTagValue(detailText, "사건명");
 
-        // [★ 핵심 트리 구분 가공]: 카테고리 세그먼트별 독립 서식 치환 바인딩
+        if (sentenceDate && sentenceDate.replace(/[^0-9]/g, "").length === 8) {
+            var dStr = sentenceDate.replace(/[^0-9]/g, "");
+            sentenceDate = dStr.substring(0, 4) + ". " + parseInt(dStr.substring(4, 6), 10) + ". " + parseInt(dStr.substring(6, 8), 10) + ".";
+        }
+
         var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
         var summary2 = cleanText(getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지"));
         
@@ -588,7 +592,6 @@
         var verb = isDetc ? "결정" : "선고";
         var documentType = isDetc ? "결정" : "판결";
         
-        // 트리 컴포넌트별 다른 룰 개별 가동 (전체 대괄호/글로벌 훼손 개행 필터 완전히 분리 제거!)
         var finalCourtHeader = courtName + " " + sentenceDate + " " + verb + " \n" + caseNumber + " " + documentType + " \n[" + caseName + "]\n";
         var formattedSummary1 = summary1 ? "【판시사항】\n" + formatSection(summary1, 'summary', isDetc) : "";
         var formattedSummary2 = summary2 ? (isDetc ? "【결정요지】\n" + formatSection(summary2, 'summary', isDetc) : "【판결요지】\n" + formatSection(summary2, 'summary', isDetc)) : "";
@@ -606,7 +609,6 @@
         return perfectFormattedText;
     }
 
-    // [★ 무정지 배치 실행 엔진 및 에러 캡처 피드백]
     async function handleDownload(type) {
         clearLog();
         var inputData = document.getElementById('searchInput').value;
@@ -625,7 +627,6 @@
         for (var i = 0; i < caseList.length; i++) {
             var caseNum = caseList[i];
             
-            // 패킷 버스트로 인한 법제처 서버 일시 차단 방지를 위한 조율된 대기 타임 주입
             if (i > 0) {
                 await new Promise(function(resolve) { setTimeout(resolve, 350); });
             }
@@ -705,15 +706,12 @@
         }
     }
 
-    // [★ 고품격 세그먼트 독립 폰트 패밀리 분리 마운트 및 가중치 제어 인쇄 엔진]
     async function downloadPDF(data) {
         addLog("PDF 컴파일러 가동 및 한글 폰트 주입 분석 중...");
         try {
-            // [★ 핵심 교정]: Regular와 Bold를 jsPDF에 완전히 독립된 패밀리로 분할 마운트하여 100% 롤백 오인 현상을 차단!
             var fontBase64Regular = await fetchFontAsBase64("./NotoSansKR-Regular.ttf", "NotoSansKR Regular");
             var fontBase64Bold = await fetchFontAsBase64("./NotoSansKR-Bold.ttf", "NotoSansKR Bold");
 
-            // 예외 방어선: 로컬 파일의 CDN 캐시 전파 지연 등을 우려한 300KB급 고속 온라인 미니민 Noto Sans KR CDN 우회 백업 탑재
             if (!fontBase64Regular) {
                 addLog("⚠️ 로컬 NotoSansKR-Regular.ttf 로드 우회 처리. 예비 초고속 CDN 복원망을 구동합니다.", "warn");
                 fontBase64Regular = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Regular.ttf", "NotoSansKR Regular (예비)");
@@ -732,7 +730,7 @@
             }
             if (fontBase64Bold) {
                 doc.addFileToVFS("NotoSansKR-Bold.ttf", fontBase64Bold);
-                doc.addFont("NotoSansKR-Bold.ttf", "NotoSansKR-Bold", "normal"); // NotoSansKR-Bold 패밀리로 독립 마운트!
+                doc.addFont("NotoSansKR-Bold.ttf", "NotoSansKR-Bold", "normal");
             }
 
             if (fontBase64Regular || fontBase64Bold) {
@@ -758,16 +756,14 @@
                 var item = data[i];
                 if (i > 0) doc.addPage();
 
-                // [★ 페이지 최상단 기본 폰트 강제 재지정 규칙 준수]: 페이지 연계 롤백 현상 해결
                 if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
                 doc.setTextColor(32, 33, 36);
 
-                // [에러 유형별 우회 안내서 출력]
                 if (item.isError) {
                     addLog("[" + item.title + "] PDF 우회 링크 페이지 생성 중...");
                     var currentY = margin + 10;
 
-                    if (fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal"); // 독립 패밀리로 설정하여 100% 볼드 확보!
+                    if (fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
                     doc.setFontSize(fontSizeTitle);
                     doc.setTextColor(220, 53, 69);
                     doc.text("판례 수집 실패 보고서", margin, currentY);
@@ -816,7 +812,6 @@
                 var currentY = margin + 5;
                 var paragraphs = item.content.split('\n');
                 
-                // [★ 획기적 3줄 카운터식 사건헤더 판독 엔진]: 줄바꿈에 관계없이 정확히 문서 최상단 3줄만 볼딩 처리
                 var nonSpaceParaCount = 0; 
 
                 for (var j = 0; j < paragraphs.length; j++) {
@@ -828,18 +823,16 @@
 
                     nonSpaceParaCount++;
 
-                    // [★ 정밀 가독성 폰트 판독 엔진]: 남발되던 Bold 처리를 차단하고 오직 목차 구조에만 Bold 매핑
                     var isBold = false;
                     var trimmed = para.trim();
                     if (nonSpaceParaCount <= 3) {
-                        isBold = true; // 최초 사건정보 3줄 (법원명, 선고번호, 사건명)
+                        isBold = true; 
                     } else if (trimmed.startsWith("【") && trimmed.endsWith("】")) {
-                        isBold = true; // 최상위 카테고리 헤더
+                        isBold = true; 
                     } else if (trimmed.match(/^(대법관|대법원장|헌법재판소장|재판관)\s+[가-힣]/)) {
-                        isBold = true; // 결미 재판부 서명부
+                        isBold = true; 
                     }
 
-                    // [★ 핵심]: Bold 여부에 따라 완벽하게 검증된 개별 폰트 패키지 매핑
                     if (isBold && fontBase64Bold) {
                         doc.setFont("NotoSansKR-Bold", "normal");
                     } else if (fontBase64Regular) {
@@ -850,7 +843,6 @@
                     for (var k = 0; k < lines.length; k++) {
                         if (currentY > bottomLimit) {
                             doc.addPage();
-                            // [★ 수정 포인트]: 신규 페이지 추가 후에도 줄바꿈 도중 폰트 누수가 생기지 않도록 즉각 재설정
                             if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
                             if (isBold && fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
                             currentY = margin + 10;
@@ -873,5 +865,3 @@
 
 </body>
 </html>
-
-```
