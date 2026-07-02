@@ -507,9 +507,11 @@
         
         // [문제 2번 패스트 패일 해결]: 검색 텍스트를 받아온 직후 totalCnt 검증을 거치도록 배치하여 없는 판례 검증 지연 원천 차단
         var totalCnt = getXmlTagValue(searchText, "totalCnt");
-        if (totalCnt === "0" || !searchText.includes("<" + blockTag)) {
+        
+        // [버그 수정]: 법제처 XML 태그의 대소문자(DetcSearch 등) 변화에 유연하게 대응하도록 toLowerCase() 처리 적용
+        if (totalCnt === "0" || totalCnt === "" || !searchText.toLowerCase().includes("<" + blockTag.toLowerCase())) {
             throw { type: "NOT_FOUND", message: "해당 사건번호 양식과 매핑되는 판결 정보가 존재하지 않습니다." };
-        }
+        }        
 
         await new Promise(function(resolve) { setTimeout(resolve, 350); });
 
