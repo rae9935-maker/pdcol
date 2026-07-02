@@ -245,23 +245,33 @@
         }, 3000);
     }
 
-    // [★ 보안 업데이트] 페이지 로드 시 구동 메커니즘 변경
+    // [★ 초벌 연결 엔진] oc 키가 없는 초기 진입 상태에서도 에러 없이 안전하게 프록시 라인을 사전 가열
+    function warmUpProxies() {
+        var testTargets = [
+            "https://corsproxy.io/?https%3A%2F%2Fwww.law.go.kr",
+            "https://api.codetabs.com/v1/proxy?url=https%3A%2F%2Fwww.law.go.kr",
+            "https://api.allorigins.win/raw?url=https%3A%2F%2Fwww.law.go.kr"
+        ];
+        testTargets.forEach(function(url) {
+            fetch(url, { method: 'HEAD' }).catch(function(){});
+        });
+    }
+
     window.onload = function() {
         try {
-            // 과거 로컬 스토리지에 정적 보관되어 있던 취약 데이터가 있다면 즉시 강제 파기
             if (localStorage.getItem('law_api_oc')) {
                 localStorage.removeItem('law_api_oc');
             }
             
-            // 현재 활성화된 탭 세션 범위 내의 데이터망만 조회
             var savedOC = sessionStorage.getItem('law_api_oc');
             if (savedOC) {
                 document.getElementById('ocInput').value = savedOC;
             }
+            
+            warmUpProxies();
         } catch (e) {}
     };
 
-    // [★ 보안 업데이트] 로컬 영구 저장을 차단하고 세션 가상 메모리에 바인딩
     function saveOCKey() {
         var ocValue = document.getElementById('ocInput').value.trim();
         try {
@@ -335,7 +345,7 @@
         });
     }
 
-    // [★ 글로벌 서킷 브레이커 & 프록시 헬스 매니저] 고장 나거나 차단된 프록시를 일시 자동 배제
+    // [★ 글로벌 서킷 브레이커 & 프록시 헬스 매니저]
     var proxyHealth = {
         "https://corsproxy.io/?": { fails: 0, lastFail: 0 },
         "https://api.codetabs.com/v1/proxy?url=": { fails: 0, lastFail: 0 },
@@ -407,7 +417,7 @@
         return matchesNorm ? matchesNorm[0] : normalized.replace(/[^가-힣0-9]/g, "");
     }
 
-    // [★ 시맨틱 세그먼트 트리 포맷터] 트리 유형별 맞춤식 줄바꿈 레이아웃 처리기
+    // [★ 시맨틱 세그먼트 트리 포맷터]
     function formatSection(text, sectionType, isDetc) {
         if (!text) return "";
         
@@ -457,9 +467,8 @@
         return cleaned.trim();
     };
 
-    // [★ 트리 컴포넌트 단위 수집 및 개별 포맷 연계 엔진]
     async function fetchCaseTextReal(caseNum) {
-        var OC = sessionStorage.getItem('law_api_oc'); // 세션 스토리지 참조로 변경
+        var OC = sessionStorage.getItem('law_api_oc'); 
         if (!OC) throw { type: "KEY_ERROR", message: "우측 상단의 '인증키(oc)' 가 비어 있거나 세션이 만료되었습니다." };
 
         var isDetc = caseNum.includes("헌");
@@ -526,7 +535,6 @@
             var errMsg = getXmlTagValue(searchText, "errMsg");
             if (errMsg) throw { type: "KEY_ERROR", message: "법제처 API 오류 리포트: " + errMsg };
             
-            var targetLabel = isDetc ? "헌법재판소 결정례" : "대법원 판례";
             if (foundList.length > 0) {
                 throw { 
                     type: "API_RESTRICTED", 
@@ -706,6 +714,7 @@
         }
     }
 
+    // [★ 고품격 캔버스 렌더링 엔진] 사용자의 요구사항에 맞추어 모든 줄간격 승수를 2.0으로 상향 고정
     async function downloadPDF(data) {
         addLog("PDF 컴파일러 가동 및 한글 폰트 주입 분석 중...");
         try {
@@ -747,10 +756,8 @@
             var bottomLimit = pageHeight - margin;
 
             var fontSizeTitle = 15;
-            var fontSizeBody = 11;
-            
-            var lineHeightTitle = fontSizeTitle * 0.3528 * 2.0;
-            var lineHeightBody = fontSizeBody * 0.3528 * 2.0;
+            var fontSizeBody = 10; 
+            var lineHeightDefault = fontSizeBody * 0.3528 * 2.0; // [수정 포인트]: 일괄 줄간격 2.0 적용 (기본 본문행간)
 
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
@@ -767,13 +774,13 @@
                     doc.setFontSize(fontSizeTitle);
                     doc.setTextColor(220, 53, 69);
                     doc.text("판례 수집 실패 보고서", margin, currentY);
-                    currentY += lineHeightTitle + 6;
+                    currentY += (fontSizeTitle * 0.3528 * 2.0) + 6; // 에러문 헤더 간격도 2.0배 연동
 
                     if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
                     doc.setFontSize(fontSizeBody);
                     doc.setTextColor(32, 33, 36);
                     doc.text("대상 사건번호: " + item.title, margin, currentY);
-                    currentY += lineHeightBody + 8;
+                    currentY += lineHeightDefault + 8;
 
                     doc.setTextColor(108, 117, 125);
                     var detailDesc = "";
@@ -790,7 +797,7 @@
                     var descLines = doc.splitTextToSize(detailDesc + " 수집을 임시 우회하여 국가법률정보센터 정식 웹 뷰어에서 직접 읽으실 수 있는 안전 하이퍼링크를 아래에 인젝션해 드립니다.", printWidth);
                     for (var k = 0; k < descLines.length; k++) {
                         doc.text(descLines[k], margin, currentY);
-                        currentY += lineHeightBody;
+                        currentY += lineHeightDefault;
                     }
                     currentY += 8;
 
@@ -811,26 +818,32 @@
                 addLog("[" + item.title + "] 고급 독해용 레이아웃 구성 및 도면 드로잉 중...");
                 var currentY = margin + 5;
                 var paragraphs = item.content.split('\n');
-                
                 var nonSpaceParaCount = 0; 
 
                 for (var j = 0; j < paragraphs.length; j++) {
                     var para = paragraphs[j];
                     if (para.trim() === "") {
-                        currentY += lineHeightBody;
+                        currentY += lineHeightDefault; 
                         continue;
                     }
 
                     nonSpaceParaCount++;
 
                     var isBold = false;
+                    var currentFontSize = fontSizeBody; 
                     var trimmed = para.trim();
+
                     if (nonSpaceParaCount <= 3) {
                         isBold = true; 
-                    } else if (trimmed.startsWith("【") && trimmed.endsWith("】")) {
+                        currentFontSize = 12; 
+                    } else if ((trimmed.startsWith("【") && trimmed.endsWith("】")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
                         isBold = true; 
+                        currentFontSize = 11; 
                     } else if (trimmed.match(/^(대법관|대법원장|헌법재판소장|재판관)\s+[가-힣]/)) {
                         isBold = true; 
+                        currentFontSize = 10; 
+                    } else {
+                        currentFontSize = 10; 
                     }
 
                     if (isBold && fontBase64Bold) {
@@ -838,6 +851,10 @@
                     } else if (fontBase64Regular) {
                         doc.setFont("NotoSansKR", "normal");
                     }
+                    doc.setFontSize(currentFontSize);
+
+                    // [★ 핵심 교정]: 위계와 글꼴 크기에 관계없이 수치를 일률적으로 2.0배 확장 적용
+                    var currentLineHeight = currentFontSize * 0.3528 * 2.0;
 
                     var lines = doc.splitTextToSize(para, printWidth);
                     for (var k = 0; k < lines.length; k++) {
@@ -845,12 +862,13 @@
                             doc.addPage();
                             if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
                             if (isBold && fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
+                            doc.setFontSize(currentFontSize);
                             currentY = margin + 10;
                         }
                         doc.text(lines[k], margin, currentY);
-                        currentY += lineHeightBody;
+                        currentY += currentLineHeight;
                     }
-                    currentY += lineHeightBody;
+                    currentY += 1; 
                 }
             }
 
