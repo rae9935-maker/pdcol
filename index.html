@@ -448,42 +448,16 @@
     function formatSection(text, sectionType, isDetc) {
         if (!text) return "";
         
+        // 가로 공백을 깔끔하게 일선 정돈합니다.
         var formatted = text.replace(/[ \t]+/g, ' ');
         
-        formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
-        formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
-        formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
-        formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\b/g, "$1〔DOT〕$2");
-        
-        formatted = formatted.replace(/\s*(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)\s*/g, "\n\n$1\n\n");
-
-        formatted = formatted.replace(/([.\)\]])\s*([가나다라마바사아자차카타파하]\.)/g, "$1\n\n$2");
-
-        if (sectionType === 'summary') {
-            if (isDetc) {
-                formatted = formatted.replace(/(^|\s)(\d+\.\s+)/g, "$1\n\n$2");
-            } else {
-                formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
-            }
-        } else if (sectionType === 'body') {
-            formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
-            
-            formatted = formatted.replace(/(^|\s|['"‘“])(\d+\.\s+상고이유|\d+\.\s+먼저|\d+\.\s+)/g, "$1\n\n$2");
-            formatted = formatted.replace(/(^|\s|['"‘“])([가나다라마바사아자차카타파하]\.\s+)/g, "$1\n\n$2");
-            formatted = formatted.replace(/(^|\s)(\((\d+)\)\s+)/g, "$1\n\n$2");
-            formatted = formatted.replace(/(^|\s)(그러므로\s+상고를\s+기각하고)/g, "$1\n\n$2");
-            
-            formatted = formatted.replace(/([^\n])\s*(\[대법관[^\]]+의견\])/g, "$1\n\n$2\n\n");
-            formatted = formatted.replace(/(\.|\?|!)\s*((대법관|대법원장|헌법재판소장|재판관)\s+[가-힣])/g, "$1\n\n$2");
-            formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관|대법원장|헌법재판소장|재판관)/g, "$1\n\n$3");
-
-            formatted = formatted.replace(/(\d+\.\s+원심판결의\s+요지|\d+\.\s+대법원의\s+판단|\d+\.\s+결론)/g, "$1\n");
-            formatted = formatted.replace(/([가나다라마바사아자차카타파하]\.\s+상고이유\s+제?\s*\d+\s*점에\s+대하여)/g, "$1\n");
-        }
-
-        formatted = formatted.replace(/(?<!\b\d{1,4})(?<!\b[가나다라마바사아자차카타파하])([.?!])[ \t]+([^\n])/g, "$1\n$2");
-
-        formatted = formatted.replace(/〔DOT〕/g, ".");
+        // 1. 주요 권역별 대괄호 타이틀(【주문】, 【이유】 등) 앞뒤로 시각적 여백(빈 줄)을 확실하게 확보합니다.
+        formatted = formatted.replace(/\s*(【[^】]+】)\s*/g, "\n\n$1\n\n");
+    
+        // 2. [1], [2] 같은 판시사항 및 결정요지 목차 기호가 문장 뒤에 바짝 붙어있다면 개행을 주어 가독성을 높입니다.
+        formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
+    
+        // 3. 데이터 결합 과정에서 우연히 발생할 수 있는 3단 이상의 과도한 연속 개행을 깔끔하게 2단(빈 줄 하나)으로 축소 정돈합니다.
         formatted = formatted.replace(/\n{3,}/g, "\n\n");
         
         return formatted.trim();
@@ -491,13 +465,19 @@
 
     var cleanText = function(str) {
         if (!str) return "";
-        var cleaned = str.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
+        
+        // 1. <br/> 이나 <br> 태그를 명시적인 개행 문자(\n)로 가장 먼저 치환합니다.
+        var cleaned = str.replace(/<br\s*\/?>/gi, '\n');
+        
+        // 2. 나머지 시스템 XML/HTML 태그를 안전하게 제거하고 특수 공백(&nbsp;)을 스페이스로 바꿉니다.
+        cleaned = cleaned.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
+        
+        // 3. 다양한 운영체제의 줄바꿈 기호를 \n으로 통일합니다.
         cleaned = cleaned.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        cleaned = cleaned.replace(/\n\s*\n/g, '〔P_BREAK〕');
-        cleaned = cleaned.replace(/([가-힣])\n(다|라|까)\b/g, "$1$2");
-        cleaned = cleaned.replace(/\n/g, ' ');
-        cleaned = cleaned.replace(/〔P_BREAK〕/g, '\n\n');
+        
+        // 4. 문장 중간에 찌그러진 가로 공백(탭, 연속 스페이스)만 한 칸의 스페이스로 정리합니다.
         cleaned = cleaned.replace(/[ \t]+/g, ' ');
+        
         return cleaned.trim();
     };
 
