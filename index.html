@@ -329,7 +329,13 @@
         });
     }
 
-    // [★ 로드밸런싱 우회 전송 프록시 라우터] 동시 부하를 분산하고 일시 거부를 즉각 대체 차단
+    // [★ 글로벌 서킷 브레이커 & 프록시 헬스 매니저] 고장 나거나 차단된 프록시를 일시 자동 배제
+    var proxyHealth = {
+        "https://corsproxy.io/?": { fails: 0, lastFail: 0 },
+        "https://api.codetabs.com/v1/proxy?url=": { fails: 0, lastFail: 0 },
+        "https://api.allorigins.win/raw?url=": { fails: 0, lastFail: 0 }
+    };
+
     async function fetchWithFallback(targetUrl, caseNum) {
         var proxies = [
             "https://corsproxy.io/?",
@@ -337,28 +343,48 @@
             "https://api.allorigins.win/raw?url="
         ];
         
-        // 프록시 시작 지점을 무작위로 설정하여 대용량 호출 시 동일 주소 병목 우회
-        var startIdx = Math.floor(Math.random() * proxies.length);
-        
-        for (var i = 0; i < proxies.length; i++) {
-            var idx = (startIdx + i) % proxies.length;
-            var currentProxy = proxies[idx];
-            var proxyName = idx === 0 ? "고속망" : idx === 1 ? "기본망" : "비상망";
+        var now = Date.now();
+        // 최근 45초 이내에 연속 2회 이상 장애를 일으킨 프록시는 필터링하여 배제
+        var activeProxies = proxies.filter(function(p) {
+            var h = proxyHealth[p];
+            if (h.fails >= 2 && (now - h.lastFail) < 45000) {
+                return false; 
+            }
+            return true;
+        });
+
+        if (activeProxies.length === 0) {
+            activeProxies = proxies; // 전체 전멸 시 강제 안전망 복구
+        }
+
+        // 라운드 로빈 효과를 위해 무작위 정렬
+        activeProxies.sort(function() { return Math.random() - 0.5; });
+
+        for (var i = 0; i < activeProxies.length; i++) {
+            var currentProxy = activeProxies[i];
+            var proxyName = currentProxy.includes("corsproxy") ? "고속망" : currentProxy.includes("codetabs") ? "기본망" : "비상망";
             
             try {
                 var finalUrl = currentProxy + encodeURIComponent(targetUrl);
                 var controller = new AbortController();
-                var id = setTimeout(function() { controller.abort(); }, 5000); // 5초 타임아웃
+                var id = setTimeout(function() { controller.abort(); }, 4000); // 4초 타임아웃으로 빠른 페일오버 실행
                 
                 var res = await fetch(finalUrl, { signal: controller.signal });
                 clearTimeout(id);
-                if (res.ok) return res;
+                if (res.ok) {
+                    if (proxyHealth[currentProxy].fails > 0) {
+                        proxyHealth[currentProxy].fails--; // 정상 통신 시 천천히 벌점 삭감
+                    }
+                    return res;
+                }
+                throw new Error("HTTP Status " + res.status);
             } catch (e) {
-                // 실패 시 불필요하게 대기하지 않고 즉각 다음 망으로 넘어가 0초 가용성 유지
-                addLog("⚠️ [" + caseNum + "] " + proxyName + " 정체로 대체 통신선 우회 구동 중...", "warn");
+                proxyHealth[currentProxy].fails++;
+                proxyHealth[currentProxy].lastFail = Date.now();
+                addLog("⚠️ [" + caseNum + "] " + proxyName + " 장애 감지. 대체 회선으로 우회 처리합니다.", "warn");
             }
         }
-        throw { type: "NETWORK_ERROR", message: "모든 우회 프록시 네트워크 대역폭 초과 및 응답 정체 타임아웃 오류가 발생했습니다." };
+        throw { type: "NETWORK_ERROR", message: "모든 CORS 우회 통신망이 일시적으로 차단되었거나 타임아웃 정체 상태입니다." };
     }
 
     function getXmlTagValue(text, tagName) {
@@ -377,8 +403,8 @@
         return matchesNorm ? matchesNorm[0] : normalized.replace(/[^가-힣0-9]/g, "");
     }
 
-    // [★ 시맨틱 세그먼트 트리 포맷터] 각 문서 카테고리 기질에 맞게 개행 룰 개별 교차 가동
-    function formatSection(text, sectionType) {
+    // [★ 시맨틱 세그먼트 트리 포맷터] 트리 유형별 맞춤식 줄바꿈 레이아웃 처리기
+    function formatSection(text, sectionType, isDetc) {
         if (!text) return "";
         
         var formatted = text.replace(/[ \t]+/g, ' ');
@@ -390,12 +416,16 @@
         formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\b/g, "$1〔DOT〕$2");
         
         if (sectionType === 'summary') {
-            // [Summary] 오직 대괄호 대목차 [1], [2] 또는 헌재 대목차(1., 2.)만 분리 개행
-            // 본문 줄글에 박힌 인라인 소번호(1. 2.)들은 훼손 없이 완벽히 문맥으로 유지
-            formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
-            formatted = formatted.replace(/(^|\n\n|\s)(\d+\.\s*)/g, "$1\n\n$2");
+            // [★ 수정 포인트]: 판시사항 내부에서는 오직 대괄호 목차 [1], [2] 만 분리 개행하며,
+            // 인라인에 포함된 1. 2. 이나 가. 나. 는 줄바꿈을 절대 하지 않고 본문 줄글로 안전 유지합니다.
+            // 단, 헌법재판소 결정례(isDetc = true)의 경우 대괄호가 없고 숫자 1. 2. 3. 이 최상위 대목차이므로 이것만 선택적 개행 처리합니다.
+            if (isDetc) {
+                formatted = formatted.replace(/(^|\s)(\d+\.\s+)/g, "$1\n\n$2");
+            } else {
+                formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
+            }
         } else if (sectionType === 'body') {
-            // [Body] 실제 판시 이유: 1., 가., (1) 대소목차 구조를 깔끔하게 계층 개행 처리
+            // [이유 / 전문] 실제 판결 서술부이므로 대목차, 소목차 번호를 명확하게 구조적으로 분리
             formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n\n$2 ");
             formatted = formatted.replace(/(^|\s)(\d+\.\s+상고이유|\d+\.\s+먼저|\d+\.\s+)/g, "$1\n\n$2");
             formatted = formatted.replace(/(^|\s)([가-하]\.\s+)/g, "$1\n\n$2");
@@ -527,6 +557,7 @@
         var caseNumber = getXmlTagValue(detailText, "사건번호");
         var caseName = getXmlTagValue(detailText, "사건명");
 
+        // [★ 핵심 트리 구분 가공]: 카테고리 세그먼트별 독립 서식 치환 바인딩
         var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
         var summary2 = cleanText(getXmlTagValue(detailText, "결정요지") || getXmlTagValue(detailText, "판결요지"));
         
@@ -559,10 +590,10 @@
         
         // 트리 컴포넌트별 다른 룰 개별 가동 (전체 대괄호/글로벌 훼손 개행 필터 완전히 분리 제거!)
         var finalCourtHeader = courtName + " " + sentenceDate + " " + verb + " \n" + caseNumber + " " + documentType + " \n[" + caseName + "]\n";
-        var formattedSummary1 = summary1 ? "【판시사항】\n" + formatSection(summary1, 'summary') : "";
-        var formattedSummary2 = summary2 ? (isDetc ? "【결정요지】\n" + formatSection(summary2, 'summary') : "【판결요지】\n" + formatSection(summary2, 'summary')) : "";
+        var formattedSummary1 = summary1 ? "【판시사항】\n" + formatSection(summary1, 'summary', isDetc) : "";
+        var formattedSummary2 = summary2 ? (isDetc ? "【결정요지】\n" + formatSection(summary2, 'summary', isDetc) : "【판결요지】\n" + formatSection(summary2, 'summary', isDetc)) : "";
         
-        var formattedBodyText = textBody ? formatSection(textBody, 'body') : "";
+        var formattedBodyText = textBody ? formatSection(textBody, 'body', isDetc) : "";
         if (formattedBodyText && !formattedBodyText.includes("【이유】") && !formattedBodyText.includes("【결정문】") && !formattedBodyText.includes("【전문】")) {
             formattedBodyText = (isDetc ? "【결정문 및 이유】\n" : "【이유】\n") + formattedBodyText;
         } else if (!formattedBodyText) {
@@ -575,6 +606,7 @@
         return perfectFormattedText;
     }
 
+    // [★ 무정지 배치 실행 엔진 및 에러 캡처 피드백]
     async function handleDownload(type) {
         clearLog();
         var inputData = document.getElementById('searchInput').value;
@@ -593,8 +625,9 @@
         for (var i = 0; i < caseList.length; i++) {
             var caseNum = caseList[i];
             
+            // 패킷 버스트로 인한 법제처 서버 일시 차단 방지를 위한 조율된 대기 타임 주입
             if (i > 0) {
-                await new Promise(function(resolve) { setTimeout(resolve, 250); });
+                await new Promise(function(resolve) { setTimeout(resolve, 350); });
             }
             
             try {
@@ -676,15 +709,18 @@
     async function downloadPDF(data) {
         addLog("PDF 컴파일러 가동 및 한글 폰트 주입 분석 중...");
         try {
-            // [★ 획기적 폰트 분리 패밀리 마운트 기법 가동]: Regular와 Bold를 jsPDF에 완전히 독립된 패밀리로 분할 마운트하여 100% 롤백 오인 현상을 차단!
+            // [★ 핵심 교정]: Regular와 Bold를 jsPDF에 완전히 독립된 패밀리로 분할 마운트하여 100% 롤백 오인 현상을 차단!
             var fontBase64Regular = await fetchFontAsBase64("./NotoSansKR-Regular.ttf", "NotoSansKR Regular");
             var fontBase64Bold = await fetchFontAsBase64("./NotoSansKR-Bold.ttf", "NotoSansKR Bold");
 
+            // 예외 방어선: 로컬 파일의 CDN 캐시 전파 지연 등을 우려한 300KB급 고속 온라인 미니민 Noto Sans KR CDN 우회 백업 탑재
             if (!fontBase64Regular) {
+                addLog("⚠️ 로컬 NotoSansKR-Regular.ttf 로드 우회 처리. 예비 초고속 CDN 복원망을 구동합니다.", "warn");
                 fontBase64Regular = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Regular.ttf", "NotoSansKR Regular (예비)");
             }
             if (!fontBase64Bold) {
-                fontBase64Bold = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Bold.ttf", "NotoSansKR Bold (예비)");
+                addLog("⚠️ 로컬 NotoSansKR-Bold.ttf 로드 우회 처리. 예비 초고속 CDN 복원망을 구동합니다.", "warn");
+                fontBase64Bold = await fetchFontAsBase64("https://cdn.jsdelivr.net/gh/sunnypark/noto-sans-kr-minify@master/fonts/NotoSansKR-Bold.ttf", "NotoSansKR Bold (CDN 예비)");
             }
 
             var jsPDF = window.jspdf.jsPDF;
@@ -721,6 +757,10 @@
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
                 if (i > 0) doc.addPage();
+
+                // [★ 페이지 최상단 기본 폰트 강제 재지정 규칙 준수]: 페이지 연계 롤백 현상 해결
+                if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
+                doc.setTextColor(32, 33, 36);
 
                 // [에러 유형별 우회 안내서 출력]
                 if (item.isError) {
@@ -775,25 +815,28 @@
                 addLog("[" + item.title + "] 고급 독해용 레이아웃 구성 및 도면 드로잉 중...");
                 var currentY = margin + 5;
                 var paragraphs = item.content.split('\n');
-                var isCaseHeader = true; // 첫 빈 줄을 만나기 전까지는 사건번호 및 법원명 헤더 구역
+                
+                // [★ 획기적 3줄 카운터식 사건헤더 판독 엔진]: 줄바꿈에 관계없이 정확히 문서 최상단 3줄만 볼딩 처리
+                var nonSpaceParaCount = 0; 
 
                 for (var j = 0; j < paragraphs.length; j++) {
                     var para = paragraphs[j];
                     if (para.trim() === "") {
                         currentY += lineHeightBody;
-                        isCaseHeader = false; // 빈 줄을 만나면 사건헤더 구간 종료
                         continue;
                     }
+
+                    nonSpaceParaCount++;
 
                     // [★ 정밀 가독성 폰트 판독 엔진]: 남발되던 Bold 처리를 차단하고 오직 목차 구조에만 Bold 매핑
                     var isBold = false;
                     var trimmed = para.trim();
-                    if (isCaseHeader) {
-                        isBold = true; // 대법원 200X.X.X 선고 ... 와 같은 맨 처음 3줄만 굵게
+                    if (nonSpaceParaCount <= 3) {
+                        isBold = true; // 최초 사건정보 3줄 (법원명, 선고번호, 사건명)
                     } else if (trimmed.startsWith("【") && trimmed.endsWith("】")) {
-                        isBold = true; // 【판시사항】, 【판결요지】, 【이유】 등의 대분류 헤더만 굵게
+                        isBold = true; // 최상위 카테고리 헤더
                     } else if (trimmed.match(/^(대법관|대법원장|헌법재판소장|재판관)\s+[가-힣]/)) {
-                        isBold = true; // 결미 판사부만 굵게
+                        isBold = true; // 결미 재판부 서명부
                     }
 
                     // [★ 핵심]: Bold 여부에 따라 완벽하게 검증된 개별 폰트 패키지 매핑
@@ -807,6 +850,9 @@
                     for (var k = 0; k < lines.length; k++) {
                         if (currentY > bottomLimit) {
                             doc.addPage();
+                            // [★ 수정 포인트]: 신규 페이지 추가 후에도 줄바꿈 도중 폰트 누수가 생기지 않도록 즉각 재설정
+                            if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
+                            if (isBold && fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
                             currentY = margin + 10;
                         }
                         doc.text(lines[k], margin, currentY);
