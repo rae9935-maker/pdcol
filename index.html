@@ -739,7 +739,7 @@
             }
 
             var margin = 10, pageWidth = 210, pageHeight = 297, printWidth = pageWidth - (margin * 2), bottomLimit = pageHeight - margin;
-            var fontSizeTitle = 15, fontSizeBody = 10, lineHeightDefault = fontSizeBody * 0.3528 * 1.5; 
+            var fontSizeTitle = 15, fontSizeBody = 10, lineHeightDefault = fontSizeBody * 0.3528 * 2; 
 
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
@@ -753,7 +753,7 @@
                     if (fontBase64Bold) doc.setFont("NotoSansKR-Bold", "normal");
                     doc.setFontSize(fontSizeTitle); doc.setTextColor(220, 53, 69);
                     doc.text("판례 수집 실패 보고서", margin, currentY);
-                    currentY += (fontSizeTitle * 0.3528 * 1.5) + 6;
+                    currentY += (fontSizeTitle * 0.3528 * 2) + 6;
 
                     if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
                     doc.setFontSize(fontSizeBody); doc.setTextColor(32, 33, 36);
@@ -821,7 +821,7 @@
                     }
                     doc.setFontSize(currentFontSize);
 
-                    var currentLineHeight = currentFontSize * 0.3528 * 1.5;
+                    var currentLineHeight = currentFontSize * 0.3528 * 2;
 
                     var lines = doc.splitTextToSize(para, printWidth);
                     for (var k = 0; k < lines.length; k++) {
