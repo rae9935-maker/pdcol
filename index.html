@@ -344,7 +344,6 @@
         });
     }
 
-    // [★ 서킷 브레이커 구조적 상태 결함 전면 완치 엔진]
     var proxyHealth = {
         "https://corsproxy.io/?": { fails: 0, lastFail: 0 },
         "https://api.codetabs.com/v1/proxy?url=": { fails: 0, lastFail: 0 },
@@ -362,7 +361,6 @@
         var activeProxies = proxies.filter(function(p) {
             var h = proxyHealth[p];
             if (h.fails >= 2) {
-                // [★ 핵심 교정]: 격리 쿨다운(45초)이 끝난 회선은 다시 정상 상태(fails = 0)로 완전히 세탁 후 부활
                 if (now - h.lastFail > 45000) {
                     h.fails = 0;
                     return true;
@@ -373,7 +371,6 @@
         });
 
         if (activeProxies.length === 0) {
-            // [★ 핵심 교정]: 전체 전멸 시 메모리 교착 상태를 파괴하기 위해 모든 fails 스코어를 강제 제로베이스화
             proxies.forEach(function(p) { proxyHealth[p].fails = 0; });
             activeProxies = proxies; 
         }
@@ -396,7 +393,6 @@
                 var res = await fetch(finalUrl, { signal: controller.signal });
                 clearTimeout(id);
                 if (res.ok) {
-                    // [★ 핵심 교정]: 통신 성공 시 잔여 누적 점수를 완전 차감(0) 처리하여 선제적 마비 현상을 방지
                     proxyHealth[currentProxy].fails = 0; 
                     return res;
                 }
@@ -426,6 +422,7 @@
         return matchesNorm ? matchesNorm[0] : normalized.replace(/[^가-힣0-9]/g, "");
     }
 
+    // [★ 시맨틱 세그먼트 트리 포맷터 - 줄글 임베딩 목차 차단 및 강제 단락 격리 엔진]
     function formatSection(text, sectionType, isDetc) {
         if (!text) return "";
         
@@ -438,6 +435,10 @@
         
         formatted = formatted.replace(/([^\n])\s*(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)/g, "$1\n\n$2");
         formatted = formatted.replace(/(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)\s*([^\n])/g, "$1\n\n$2");
+
+        // [★ 핵심 교정]: 마침표(`.`) 나 닫는 괄호(`)`) 바로 뒤에 공백 없이 밀착되어 파묻힌 가. 나. 다. 라. 마. 기호 전후방 단락 전면 격리
+        formatted = formatted.replace(/([.\)\]])\s*([가-하]\.)/g, "$1\n\n$2");
+        formatted = formatted.replace(/([가-하]\.)\s*([^\n\s])/g, "$1\n\n$2");
 
         if (sectionType === 'summary') {
             if (isDetc) {
@@ -862,6 +863,9 @@
                     } else if (trimmed.match(/^(대법관|대법원장|헌법재판소장|재판관)\s+[가-힣]/)) {
                         isBold = true; 
                         currentFontSize = 10; 
+                    } else if (trimmed.match(/^[가-하]\./)) {
+                        isBold = true; // [★ 추가 피드백]: 격리 분리된 가. 나. 다. 대목차 헤더 역시 볼드체 매핑 대상으로 추가 바인딩
+                        currentFontSize = 10;
                     } else {
                         currentFontSize = 10; 
                     }
