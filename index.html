@@ -422,12 +422,13 @@
         return matchesNorm ? matchesNorm[0] : normalized.replace(/[^가-힣0-9]/g, "");
     }
 
-    // [★ 시맨틱 세그먼트 트리 포맷터 - 줄글 임베딩 목차 차단 및 강제 단락 격리 엔진]
+    // [★ 시맨틱 세그먼트 트리 포맷터 - 문장 전용 독립 라인 개행 제어 엔진]
     function formatSection(text, sectionType, isDetc) {
         if (!text) return "";
         
         var formatted = text.replace(/[ \t]+/g, ' ');
         
+        // 연월일 및 숫자 마침표 안전 구역 격리 보호
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
         formatted = formatted.replace(/(\d{1,4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         formatted = formatted.replace(/(\b\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
@@ -436,7 +437,6 @@
         formatted = formatted.replace(/([^\n])\s*(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)/g, "$1\n\n$2");
         formatted = formatted.replace(/(【(?:주\s*문|이\s*유|원고|피고|피청구인|청구인|원심|판시|요지|결정)[^】]*】)\s*([^\n])/g, "$1\n\n$2");
 
-        // [★ 핵심 교정]: 마침표(`.`) 나 닫는 괄호(`)`) 바로 뒤에 공백 없이 밀착되어 파묻힌 가. 나. 다. 라. 마. 기호 전후방 단락 전면 격리
         formatted = formatted.replace(/([.\)\]])\s*([가-하]\.)/g, "$1\n\n$2");
         formatted = formatted.replace(/([가-하]\.)\s*([^\n\s])/g, "$1\n\n$2");
 
@@ -458,6 +458,10 @@
             formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관|대법원장|헌법재판소장|재판관)/g, "$1\n\n$3");
         }
 
+        // [★ 핵심 업데이트]: 보호 구역 외부의 순수 문장 마침표군(. ? !) 정밀 감지 후 '단일 개행(\n)' 우회 인젝션
+        formatted = formatted.replace(/([.?!])\s+([^\n])/g, "$1\n$2");
+
+        // 격리 기호 원상 복구
         formatted = formatted.replace(/〔DOT〕/g, ".");
         formatted = formatted.replace(/\n{3,}/g, "\n\n");
         
@@ -736,6 +740,7 @@
         }
     }
 
+    // [★ 고품격 문장 개행 전용 PDF 컴파일 인쇄 엔진]
     async function downloadPDF(data) {
         addLog("PDF 컴파일러 가동 및 한글 폰트 주입 분석 중...");
         try {
@@ -778,7 +783,9 @@
 
             var fontSizeTitle = 15;
             var fontSizeBody = 10; 
-            var lineHeightDefault = fontSizeBody * 0.3528 * 2.0; 
+            
+            // [★ 핵심 교정]: 가독성을 해치지 않도록 문장 간 기본 줄간격 가중치를 명확하게 1.5배로 슬림 압축 조정
+            var lineHeightDefault = fontSizeBody * 0.3528 * 1.5; 
 
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
@@ -795,7 +802,7 @@
                     doc.setFontSize(fontSizeTitle);
                     doc.setTextColor(220, 53, 69);
                     doc.text("판례 수집 실패 보고서", margin, currentY);
-                    currentY += (fontSizeTitle * 0.3528 * 2.0) + 6; 
+                    currentY += (fontSizeTitle * 0.3528 * 1.5) + 6; 
 
                     if (fontBase64Regular) doc.setFont("NotoSansKR", "normal");
                     doc.setFontSize(fontSizeBody);
@@ -843,6 +850,8 @@
 
                 for (var j = 0; j < paragraphs.length; j++) {
                     var para = paragraphs[j];
+                    
+                    // [★ 핵심 교정]: 문단과 문단 사이에 완벽한 공백 빈 줄 라인을 배치
                     if (para.trim() === "") {
                         currentY += lineHeightDefault; 
                         continue;
@@ -864,7 +873,7 @@
                         isBold = true; 
                         currentFontSize = 10; 
                     } else if (trimmed.match(/^[가-하]\./)) {
-                        isBold = true; // [★ 추가 피드백]: 격리 분리된 가. 나. 다. 대목차 헤더 역시 볼드체 매핑 대상으로 추가 바인딩
+                        isBold = true; 
                         currentFontSize = 10;
                     } else {
                         currentFontSize = 10; 
@@ -877,7 +886,8 @@
                     }
                     doc.setFontSize(currentFontSize);
 
-                    var currentLineHeight = currentFontSize * 0.3528 * 2.0;
+                    // [★ 핵심 교정]: 문장 간의 물리적 간격을 철저하게 1.5배 고정으로 바인딩
+                    var currentLineHeight = currentFontSize * 0.3528 * 1.5;
 
                     var lines = doc.splitTextToSize(para, printWidth);
                     for (var k = 0; k < lines.length; k++) {
@@ -891,7 +901,6 @@
                         doc.text(lines[k], margin, currentY);
                         currentY += currentLineHeight;
                     }
-                    currentY += 1; 
                 }
             }
 
