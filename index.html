@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>판례 검색기</title>
     
+    <!-- jsPDF 라이브러리 로드 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
@@ -322,15 +323,39 @@
         return "";
     }
 
-    // [정밀 개행 변환 엔진] 날짜 훼손 오류를 완벽히 차단한 렌더링 코어
+    // [★ 신규 탑재] 법제처 무작위 하드랩 개행을 완벽히 정규화하는 데이터 클렌징 엔진
+    function cleanRawText(text) {
+        if (!text) return "";
+        
+        // 1. 개행 표준 정돈 (\r\n -> \n)
+        var cleaned = text.replace(/\r\n/g, '\n');
+        
+        // 2. 단어 중간에서 쪼개진 어미(다, 라, 까)는 공백 없이 바로 병합
+        cleaned = cleaned.replace(/([가-힣])\n(다|라|까)\b/g, "$1$2");
+        
+        // 3. 진짜 문단 구분(더블 개행 이상)은 유실되지 않도록 임시 마커로 완벽 보호
+        cleaned = cleaned.replace(/\n\s*\n/g, '〔P_BREAK〕');
+        
+        // 4. 남아있는 문장 중간의 임의의 단일 개행(\n)은 전부 공백 하나로 치환하여 병합
+        cleaned = cleaned.replace(/\n/g, ' ');
+        
+        // 5. 보호했던 문단 구분 마커를 다시 더블 개행(\n\n)으로 복구
+        cleaned = cleaned.replace(/〔P_BREAK〕/g, '\n\n');
+        
+        // 6. 다중 스페이스 정돈
+        cleaned = cleaned.replace(/[ \t]+/g, ' ');
+        
+        return cleaned.trim();
+    }
+
+    // [정밀 개행 변환 엔진] 유저 예시를 분석하여 완벽한 줄바꿈 분리를 처리하는 코어 유닛
     function formatCaseContent(text) {
         if (!text) return "";
         
         // 1. 문서 전체의 다중 연속 공백 파편 제거 및 단일화
         var formatted = text.replace(/[ \t]+/g, ' ');
         
-        // [★버그 수정 핵심]: 날짜 형태(예: 2006. 9. 27. 또는 2001. 7. 10.) 내의 마침표를 
-        // 임시 특수 기호로 치환하여 본문 목차 정렬 엔진의 간섭망으로부터 완벽하게 보호합니다.
+        // [날짜 보호 레이어]: 날짜 마침표가 본문 목차 마침표 정렬과 겹쳐 쪼개지지 않도록 일시 치환
         formatted = formatted.replace(/(\d{4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕$3〔DOT〕");
         formatted = formatted.replace(/(\d{4})\s*\.\s*(\d{1,2})\s*\./g, "$1〔DOT〕$2〔DOT〕");
         
@@ -340,7 +365,7 @@
         // 3. 판시사항/판결요지 내부의 항목 번호([1], [2]) 직전 강제 개행 배치 처리
         formatted = formatted.replace(/([^\n])\s*(\[(\d+)\])/g, "$1\n$2");
         
-        // 4. 본문 세부 목차 번호 자동 개행 및 여백 확보 (순수 리스트 기호만 필터링)
+        // 4. 본문 세부 목차 번호 자동 개행 및 여백 확보 (단어 앞 공간에 공백/시작점이 있는 순수 목록 기호만 필터링)
         formatted = formatted.replace(/(^|\s)(\d+\.\s+상고이유|\d+\.\s+먼저|\d+\.\s+)/g, "$1\n\n$2");
         formatted = formatted.replace(/(^|\s)([가-하]\.\s+)/g, "$1\n\n$2");
         formatted = formatted.replace(/(^|\s)(\((\d+)\)\s+)/g, "$1\n\n$2");
@@ -348,7 +373,9 @@
         
         // 5. [대법관 ...의 보충의견] 및 판결문 하단 대법관 명단 구역화 여백 처리
         formatted = formatted.replace(/([^\n])\s*(\[대법관[^\]]+의견\])/g, "$1\n\n$2\n\n");
-        formatted = formatted.replace(/(^|\s)((대법관|대법원장)\s+[가-힣])/g, "$1\n\n$2");
+        
+        // (★ 버그 수정: 마지막 문장과 성명이 찰딱 붙어나오는 현상을 막기 위해 마침표 바로 뒤에 대법관이 시작될 경우 강제 개행)
+        formatted = formatted.replace(/(\.|\?|!)\s*((대법관|대법원장)\s+[가-힣])/g, "$1\n\n$2");
         formatted = formatted.replace(/(주문과 같이 판결한다\.)(\s*)(대법관|대법원장)/g, "$1\n\n$3");
 
         // 6. 보호 구역에 묶여 있던 날짜 데이터의 마침표를 정당하게 원상 복구 처리
@@ -422,8 +449,9 @@
             return str.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
         };
 
-        var summary1 = cleanText(getXmlTagValue(detailText, "판시사항"));
-        var summary2 = cleanText(getXmlTagValue(detailText, "판결요지"));
+        // [★ 구조 고도화]: 각 로데이터 컴포넌트를 조립 전 1차적으로 클렌징하여 무작위 개행 원천 배제
+        var summary1 = cleanRawText(cleanText(getXmlTagValue(detailText, "판시사항")));
+        var summary2 = cleanRawText(cleanText(getXmlTagValue(detailText, "판결요지")));
         
         var bodyTags = ["전문", "판결문", "이유", "주문", "본문", "내용", "전문내용"];
         var textBody = "";
@@ -448,6 +476,9 @@
                 textBody = longestCdata;
             }
         }
+        
+        // 본문 클렌징
+        textBody = cleanRawText(textBody);
 
         var finalCourtHeader = courtName + " " + sentenceDate + " 선고 \n" + caseNumber + " 판결 \n[" + caseName + "]\n";
         var finalSummary1 = summary1 ? "【판시사항】\n" + summary1 : "";
@@ -589,7 +620,7 @@
                         continue;
                     }
 
-                    var isHeader = para.trim().startsWith("【") || para.trim().startsWith("[") || para.trim().match(/^\d+\.\s+상고이유/) || para.trim().startsWith("대법관");
+                    var isHeader = para.trim().startsWith("【") || para.trim().startsWith("[") || para.trim().match(/^\d+\.\s+상고이유/) || para.trim().match(/^[가-하]\.\s+/) || para.trim().startsWith("대법관") || para.trim().startsWith("대법원장");
                     if (isHeader && fontBase64Bold) {
                         doc.setFont("GoogleSans", "bold");
                     } else if (fontBase64Regular) {
